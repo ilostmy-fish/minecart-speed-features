@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "minecart-speed-features",
+  "version": "${version}",
+  "name": "Minecart Speed Features",
+  "description": "Standalone 1.21.1 high-speed minecart rail traversal with reconstructed client rail-path interpolation.",
+  "authors": [
+    "ilostmy_fish"
+  ],
+  "license": "CC0-1.0",
+  "icon": "assets/minecart-speed-features/icon.png",
+  "environment": "*",
+  "mixins": [
+    "minecart-speed-features.mixins.json",
+    {
+      "config": "minecart-speed-features.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

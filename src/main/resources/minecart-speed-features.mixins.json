@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "ilostmy_fish.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "GameRulesMixin",
+    "AbstractMinecartEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
