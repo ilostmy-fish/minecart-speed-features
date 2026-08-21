@@ -6,21 +6,21 @@ import ilostmy_fish.interpolation.VisualPath;
 import ilostmy_fish.rail.MoveIteration;
 import ilostmy_fish.rail.MoveResult;
 import ilostmy_fish.rail.RailRef;
-import net.minecraft.class_1297;
-import net.minecraft.class_1299;
-import net.minecraft.class_1313;
-import net.minecraft.class_1657;
-import net.minecraft.class_1688;
-import net.minecraft.class_1937;
-import net.minecraft.class_2241;
-import net.minecraft.class_2246;
-import net.minecraft.class_2248;
-import net.minecraft.class_2338;
-import net.minecraft.class_243;
-import net.minecraft.class_2442;
-import net.minecraft.class_2680;
-import net.minecraft.class_2741;
-import net.minecraft.class_2768;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.MovementType;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.vehicle.AbstractMinecartEntity;
+import net.minecraft.world.World;
+import net.minecraft.block.AbstractRailBlock;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.Block;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.block.PoweredRailBlock;
+import net.minecraft.block.BlockState;
+import net.minecraft.state.property.Properties;
+import net.minecraft.block.enums.RailShape;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -37,16 +37,16 @@ import java.util.List;
  * One logical tick may consume many rail sections, but gravity/bookkeeping/input/friction are
  * never replayed as whole entity ticks.
  */
-@Mixin(value = class_1688.class, remap = false)
-public abstract class AbstractMinecartEntityMixin extends class_1297 implements VisualInterpolationAccess {
-    @Shadow(remap = false)
-    private boolean field_44917;
+@Mixin(value = AbstractMinecartEntity.class)
+public abstract class AbstractMinecartEntityMixin extends Entity implements VisualInterpolationAccess {
+    @Shadow
+    private boolean onRail;
 
-    @Shadow(remap = false)
-    public abstract class_243 method_7508(double x, double y, double z);
+    @Shadow
+    public abstract Vec3d snapPositionToRail(double x, double y, double z);
 
-    @Shadow(remap = false)
-    public abstract class_243 method_7505(double x, double y, double z, double offset);
+    @Shadow
+    public abstract Vec3d snapPositionToRailWithOffset(double x, double y, double z, double offset);
 
     @Unique
     private static final double minecartspeedfeatures$EPSILON = 1.0E-5;
@@ -57,13 +57,15 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     @Unique
     private static final double minecartspeedfeatures$VISUAL_INTERPOLATION_MIN_DISTANCE = 1.5;
 
-    /** Client-only visual state. It never changes authoritative entity position or velocity. */
+    /**
+     * Client-only visual state. It never changes authoritative entity position or velocity.
+     */
     @Unique
     private VisualPath minecartspeedfeatures$visualPath;
     @Unique
-    private class_243 minecartspeedfeatures$visualStart;
+    private Vec3d minecartspeedfeatures$visualStart;
     @Unique
-    private class_243 minecartspeedfeatures$visualTarget;
+    private Vec3d minecartspeedfeatures$visualTarget;
     @Unique
     private int minecartspeedfeatures$visualTotalTicks;
     @Unique
@@ -71,19 +73,19 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     @Unique
     private boolean minecartspeedfeatures$visualActive;
 
-    /** Last rail shape, retained to mirror the state used by 1.1.0 launchFromRail. */
+    /**
+     * Last rail shape, retained to mirror the state used by 1.1.0 launchFromRail.
+     */
     @Unique
-    private class_2768 minecartspeedfeatures$lastRail;
+    private RailShape minecartspeedfeatures$lastRail;
 
-    /** Exact 1.1.0 update formula: sqrt(velocity.length()) / 2 * 0.95. */
+    /**
+     * Exact 1.1.0 update formula: sqrt(velocity.length()) / 2 * 0.95.
+     */
     @Unique
     private double minecartspeedfeatures$lastVelocity;
 
-    /** Y velocity after vanilla's one gravity application and before rail confinement. */
-    @Unique
-    private double minecartspeedfeatures$preRailYVelocity;
-
-    protected AbstractMinecartEntityMixin(class_1299<?> type, class_1937 world) {
+    protected AbstractMinecartEntityMixin(EntityType<?> type, World world) {
         super(type, world);
     }
 
@@ -92,22 +94,21 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
      * two interpolation ticks internally, so mirror that timing for the visual correction.
      */
     @Inject(
-            method = "method_5759(DDDFFI)V",
-            at = @At("HEAD"),
-            remap = false
+            method = "updateTrackedPositionAndAngles(DDDFFI)V",
+            at = @At("HEAD")
     )
     private void minecartspeedfeatures$captureClientInterpolation(
             double x, double y, double z, float yaw, float pitch, int interpolationSteps, CallbackInfo ci
     ) {
-        if (!this.method_37908().field_9236) {
+        if (!this.getWorld().isClient) {
             return;
         }
 
-        class_243 start = this.method_19538();
-        class_243 target = new class_243(x, y, z);
-        double dx = x - start.method_10216();
-        double dy = y - start.method_10214();
-        double dz = z - start.method_10215();
+        Vec3d start = this.getPos();
+        Vec3d target = new Vec3d(x, y, z);
+        double dx = x - start.getX();
+        double dy = y - start.getY();
+        double dz = z - start.getZ();
         double distanceSq = dx * dx + dy * dy + dz * dz;
         if (distanceSq < minecartspeedfeatures$VISUAL_INTERPOLATION_MIN_DISTANCE
                 * minecartspeedfeatures$VISUAL_INTERPOLATION_MIN_DISTANCE) {
@@ -119,7 +120,7 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         // cutting straight through a bend while the previous render correction is already on the
         // rail, so use that corrected point as the next geometric path start. The baseline start
         // remains the untouched logical position below.
-        class_243 pathStart = start;
+        Vec3d pathStart = start;
         if (this.minecartspeedfeatures$visualActive && this.minecartspeedfeatures$visualPath != null) {
             pathStart = this.minecartspeedfeatures$visualPath.sample(this.minecartspeedfeatures$visualProgress(1.0F));
         }
@@ -140,10 +141,12 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         this.minecartspeedfeatures$visualActive = true;
     }
 
-    /** Advance only our render clock. Vanilla still owns the actual client interpolation. */
-    @Inject(method = "method_5773()V", at = @At("HEAD"), remap = false)
+    /**
+     * Advance only our render clock. Vanilla still owns the actual client interpolation.
+     */
+    @Inject(method = "tick()V", at = @At("HEAD"))
     private void minecartspeedfeatures$advanceVisualInterpolation(CallbackInfo ci) {
-        if (!this.method_37908().field_9236 || !this.minecartspeedfeatures$visualActive) {
+        if (!this.getWorld().isClient || !this.minecartspeedfeatures$visualActive) {
             return;
         }
         this.minecartspeedfeatures$visualTicks++;
@@ -153,20 +156,19 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     }
 
     @Inject(
-            method = "method_7513(Lnet/minecraft/class_2338;Lnet/minecraft/class_2680;)V",
+            method = "moveOnRail(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;)V",
             at = @At("HEAD"),
-            cancellable = true,
-            remap = false
+            cancellable = true
     )
-    private void minecartspeedfeatures$moveOnRail(class_2338 initialPos, class_2680 initialState, CallbackInfo ci) {
+    private void minecartspeedfeatures$moveOnRail(BlockPos initialPos, BlockState initialState, CallbackInfo ci) {
         ci.cancel();
-        class_243 initialVelocity = this.method_18798();
-        this.minecartspeedfeatures$preRailYVelocity = initialVelocity.method_10214();
+        Vec3d initialVelocity = this.getVelocity();
+        double preRailYVelocity = initialVelocity.getY();
         double previousLastVelocity = this.minecartspeedfeatures$lastVelocity;
         // Tick-level launch history is sampled exactly once per real server tick. Rail traversal
         // iterations are movement resolution, not pseudo-ticks.
-        this.minecartspeedfeatures$lastVelocity = Math.sqrt(initialVelocity.method_1033()) / 2.0 * 0.95;
-        this.method_38785();
+        this.minecartspeedfeatures$lastVelocity = Math.sqrt(initialVelocity.length()) / 2.0 * 0.95;
+        this.onLanding();
 
         MoveIteration iteration = new MoveIteration();
         RailRef rail = this.minecartspeedfeatures$railRef(initialPos, initialState);
@@ -175,13 +177,13 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
              count < minecartspeedfeatures$MAX_RAIL_ITERATIONS && rail != null
                      && (iteration.initial || iteration.remainingMovement > minecartspeedfeatures$EPSILON);
              count++) {
-            class_243 beforeForces = this.method_18798();
+            Vec3d beforeForces = this.getVelocity();
             double oldHorizontalSpeed = minecartspeedfeatures$horizontalLength(beforeForces);
 
-            class_2768 shape = rail.shape;
+            RailShape shape = rail.shape;
             this.minecartspeedfeatures$lastRail = shape;
 
-            class_243 velocity = this.minecartspeedfeatures$calculateRailVelocity(
+            Vec3d velocity = this.minecartspeedfeatures$calculateRailVelocity(
                     beforeForces,
                     iteration,
                     rail.pos,
@@ -201,7 +203,7 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
 
             // Rail-constrained velocity itself remains horizontal, as in 1.21.1. Vertical
             // displacement is handled by the centerline path below rather than by free flight.
-            this.method_18799(new class_243(velocity.method_10216(), 0.0, velocity.method_10215()));
+            this.setVelocity(new Vec3d(velocity.getX(), 0.0, velocity.getZ()));
 
             MoveResult result = this.minecartspeedfeatures$moveAlongTrack(
                     rail.pos,
@@ -212,7 +214,7 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
             iteration.initial = false;
 
             if (result.stuck) {
-                this.method_18799(new class_243(0.0, 0.0, 0.0));
+                this.setVelocity(new Vec3d(0.0, 0.0, 0.0));
                 return;
             }
 
@@ -222,7 +224,7 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
 
             RailRef next = this.minecartspeedfeatures$findRailAtCart();
             if (next == null) {
-                this.field_44917 = false;
+                this.onRail = false;
 
                 // ADJACENT_RAIL_POSITIONS_BY_SHAPE stores the upper endpoint with dy == 0.
                 // Launch only when leaving that upper endpoint, not when descending off the low end.
@@ -232,32 +234,31 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
                     // The old transition fires after one gravity application but before off-rail
                     // movement. Restore that tick-level Y velocity; the launch routine below is
                     // then the literal 1.1.0 additive transform.
-                    class_243 launchBase = this.method_18798();
-                    this.method_18799(new class_243(
-                            launchBase.method_10216(),
-                            this.minecartspeedfeatures$preRailYVelocity,
-                            launchBase.method_10215()
+                    Vec3d launchBase = this.getVelocity();
+                    this.setVelocity(new Vec3d(
+                            launchBase.getX(),
+                            preRailYVelocity,
+                            launchBase.getZ()
                     ));
                     this.minecartspeedfeatures$launchFromRail110();
                 }
                 return;
             }
 
-            this.field_44917 = true;
+            this.onRail = true;
             rail = next;
         }
 
         // The cap is a corruption/loop guard, never a speed-derived pseudo-tick count.
         if (iteration.remainingMovement > minecartspeedfeatures$EPSILON) {
-            this.method_18799(new class_243(0.0, 0.0, 0.0));
+            this.setVelocity(new Vec3d(0.0, 0.0, 0.0));
         }
     }
 
     @Inject(
-            method = "method_7504()D",
+            method = "getMaxSpeed()D",
             at = @At("RETURN"),
-            cancellable = true,
-            remap = false
+            cancellable = true
     )
     private void minecartspeedfeatures$getMaxSpeed(CallbackInfoReturnable<Double> cir) {
         if (MinecartSpeedFeatures.MINECART_MAX_SPEED != null) {
@@ -266,20 +267,20 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     }
 
     @Unique
-    private class_243 minecartspeedfeatures$calculateRailVelocity(
-            class_243 rawVelocity,
+    private Vec3d minecartspeedfeatures$calculateRailVelocity(
+            Vec3d rawVelocity,
             MoveIteration iteration,
-            class_2338 railPos,
-            class_2680 railState,
-            class_2768 shape
+            BlockPos railPos,
+            BlockState railState,
+            RailShape shape
     ) {
-        double x = rawVelocity.method_10216();
-        double z = rawVelocity.method_10215();
+        double x = rawVelocity.getX();
+        double z = rawVelocity.getZ();
 
         // Mojang's experimental slope force is applied at most once per real tick.
         if (!iteration.slopeVelocityApplied && minecartspeedfeatures$isAscendingShape(shape)) {
             double slope = Math.max(0.0078125, Math.hypot(x, z) * 0.02);
-            if (this.method_5799()) {
+            if (this.isTouchingWater()) {
                 slope *= 0.2;
             }
             switch (shape.ordinal()) {
@@ -287,22 +288,23 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
                 case 3 -> x += slope; // ASCENDING_WEST
                 case 4 -> z += slope; // ASCENDING_NORTH
                 case 5 -> z -= slope; // ASCENDING_SOUTH
-                default -> { }
+                default -> {
+                }
             }
             iteration.slopeVelocityApplied = true;
         }
 
         // Preserve 1.21.1 rider nudging, but run it only once for this server tick.
         if (iteration.initial) {
-            class_1297 passenger = this.method_31483();
-            if (passenger instanceof class_1657) {
-                class_243 riderVelocity = passenger.method_18798();
-                double riderSq = riderVelocity.method_10216() * riderVelocity.method_10216()
-                        + riderVelocity.method_10215() * riderVelocity.method_10215();
+            Entity passenger = this.getFirstPassenger();
+            if (passenger instanceof PlayerEntity) {
+                Vec3d riderVelocity = passenger.getVelocity();
+                double riderSq = riderVelocity.getX() * riderVelocity.getX()
+                        + riderVelocity.getZ() * riderVelocity.getZ();
                 double cartSq = x * x + z * z;
                 if (riderSq > 1.0E-4 && cartSq < 0.01) {
-                    x += riderVelocity.method_10216() * 0.1;
-                    z += riderVelocity.method_10215() * 0.1;
+                    x += riderVelocity.getX() * 0.1;
+                    z += riderVelocity.getZ() * 0.1;
                     iteration.decelerated = true;
                 }
             }
@@ -313,8 +315,8 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         // The Copper Rail 0.9.4 also extends PoweredRailBlock, but its own mixin explicitly makes
         // only that custom block participate in powered-rail logic. Mirror that exact exception.
         boolean copperRail = minecartspeedfeatures$isCopperRail(railState);
-        boolean poweredRail = railState.method_26204() == class_2246.field_10425 || copperRail;
-        boolean powered = poweredRail && Boolean.TRUE.equals(railState.method_11654(class_2442.field_11364));
+        boolean poweredRail = railState.getBlock() == Blocks.POWERED_RAIL || copperRail;
+        boolean powered = poweredRail && Boolean.TRUE.equals(railState.get(PoweredRailBlock.POWERED));
 
         // An unpowered powered-rail is a brake, once. Ordinary ascending rails are never gated here.
         if (!iteration.decelerated && poweredRail && !powered) {
@@ -330,10 +332,10 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         }
 
         if (iteration.initial) {
-            double retention = this.method_5782() ? 0.997 : 0.975;
+            double retention = this.hasPassengers() ? 0.997 : 0.975;
             x *= retention;
             z *= retention;
-            if (this.method_5799()) {
+            if (this.isTouchingWater()) {
                 x *= 0.95;
                 z *= 0.95;
             }
@@ -351,11 +353,12 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         // its late callback cannot execute, so reproduce that public block behavior here. Apply
         // it once per real tick, never once per traversed rail, to avoid high-speed multiplication.
         if (powered && copperRail && !iteration.copperRailApplied) {
-            double push = Boolean.TRUE.equals(railState.method_11654(class_2741.field_12501)) ? -0.5 : 0.5;
+            double push = Boolean.TRUE.equals(railState.get(Properties.INVERTED)) ? -0.5 : 0.5;
             switch (shape.ordinal()) {
                 case 1, 2, 3 -> x += push; // EAST_WEST / ascending east-west
                 case 0, 4, 5 -> z += push; // NORTH_SOUTH / ascending north-south
-                default -> { }
+                default -> {
+                }
             }
             double speed = Math.hypot(x, z);
             double max = this.minecartspeedfeatures$maxSpeedBlocksPerTick();
@@ -381,19 +384,19 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
                 // Keep the target-version stationary kick behavior. It only chooses a direction
                 // when a solid block exists at one end of a straight powered rail.
                 int ordinal = shape.ordinal();
-                int px = railPos.method_10263();
-                int py = railPos.method_10264();
-                int pz = railPos.method_10260();
+                int px = railPos.getX();
+                int py = railPos.getY();
+                int pz = railPos.getZ();
                 if (ordinal == 1) { // EAST_WEST
-                    if (this.minecartspeedfeatures$willHitBlockAt(new class_2338(px - 1, py, pz))) {
+                    if (this.minecartspeedfeatures$willHitBlockAt(new BlockPos(px - 1, py, pz))) {
                         x = 0.02;
-                    } else if (this.minecartspeedfeatures$willHitBlockAt(new class_2338(px + 1, py, pz))) {
+                    } else if (this.minecartspeedfeatures$willHitBlockAt(new BlockPos(px + 1, py, pz))) {
                         x = -0.02;
                     }
                 } else if (ordinal == 0) { // NORTH_SOUTH
-                    if (this.minecartspeedfeatures$willHitBlockAt(new class_2338(px, py, pz - 1))) {
+                    if (this.minecartspeedfeatures$willHitBlockAt(new BlockPos(px, py, pz - 1))) {
                         z = 0.02;
-                    } else if (this.minecartspeedfeatures$willHitBlockAt(new class_2338(px, py, pz + 1))) {
+                    } else if (this.minecartspeedfeatures$willHitBlockAt(new BlockPos(px, py, pz + 1))) {
                         z = -0.02;
                     }
                 }
@@ -403,21 +406,21 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
             }
         }
 
-        return new class_243(x, 0.0, z);
+        return new Vec3d(x, 0.0, z);
     }
 
     @Unique
     private MoveResult minecartspeedfeatures$moveAlongTrack(
-            class_2338 railPos,
-            class_2768 shape,
+            BlockPos railPos,
+            RailShape shape,
             double remainingMovement
     ) {
         if (remainingMovement < minecartspeedfeatures$EPSILON) {
             return new MoveResult(0.0, false, false, 0);
         }
 
-        class_243 start = this.method_19538();
-        class_243 horizontalVelocity = this.method_18798();
+        Vec3d start = this.getPos();
+        Vec3d horizontalVelocity = this.getVelocity();
         double horizontalSpeed = minecartspeedfeatures$horizontalLength(horizontalVelocity);
         if (horizontalSpeed < minecartspeedfeatures$EPSILON) {
             return new MoveResult(0.0, false, true, 0);
@@ -431,8 +434,8 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         int by = minecartspeedfeatures$endpointBY(ordinal);
         int bz = minecartspeedfeatures$endpointBZ(ordinal);
 
-        double dotA = horizontalVelocity.method_10216() * ax + horizontalVelocity.method_10215() * az;
-        double dotB = horizontalVelocity.method_10216() * bx + horizontalVelocity.method_10215() * bz;
+        double dotA = horizontalVelocity.getX() * ax + horizontalVelocity.getZ() * az;
+        double dotB = horizontalVelocity.getX() * bx + horizontalVelocity.getZ() * bz;
         int fx = dotA < dotB ? bx : ax;
         int fy = dotA < dotB ? by : ay;
         int fz = dotA < dotB ? bz : az;
@@ -444,18 +447,18 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
 
         double ux = fx / hlen;
         double uz = fz / hlen;
-        double targetX = railPos.method_10263() + 0.5 + fx * 0.5 + ux * minecartspeedfeatures$EPSILON;
-        double targetY = railPos.method_10264() + 0.1;
-        double targetZ = railPos.method_10260() + 0.5 + fz * 0.5 + uz * minecartspeedfeatures$EPSILON;
+        double targetX = railPos.getX() + 0.5 + fx * 0.5 + ux * minecartspeedfeatures$EPSILON;
+        double targetY = railPos.getY() + 0.1;
+        double targetZ = railPos.getZ() + 0.5 + fz * 0.5 + uz * minecartspeedfeatures$EPSILON;
 
         boolean slope = ay != by;
         if (slope && !minecartspeedfeatures$ascends(horizontalVelocity, ordinal)) {
             targetY += 1.0;
         }
 
-        double dxToTarget = targetX - start.method_10216();
-        double dyToTarget = targetY - start.method_10214();
-        double dzToTarget = targetZ - start.method_10215();
+        double dxToTarget = targetX - start.getX();
+        double dyToTarget = targetY - start.getY();
+        double dzToTarget = targetZ - start.getZ();
         double fullLen = Math.sqrt(dxToTarget * dxToTarget + dyToTarget * dyToTarget + dzToTarget * dzToTarget);
         double horizontalLen = Math.hypot(dxToTarget, dzToTarget);
         if (fullLen < minecartspeedfeatures$EPSILON || horizontalLen < minecartspeedfeatures$EPSILON) {
@@ -471,16 +474,16 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         double tangentZ = dirZ * tangentScale;
 
         double requestedPath = remainingMovement * (slope ? Math.sqrt(2.0) : 1.0);
-        double candidateX = start.method_10216() + dirX * requestedPath;
-        double candidateY = start.method_10214() + dirY * requestedPath;
-        double candidateZ = start.method_10215() + dirZ * requestedPath;
+        double candidateX = start.getX() + dirX * requestedPath;
+        double candidateY = start.getY() + dirY * requestedPath;
+        double candidateZ = start.getZ() + dirZ * requestedPath;
 
         double startToTargetSq = minecartspeedfeatures$squaredDistance(
-                start.method_10216(), start.method_10214(), start.method_10215(),
+                start.getX(), start.getY(), start.getZ(),
                 targetX, targetY, targetZ
         );
         double startToCandidateSq = minecartspeedfeatures$squaredDistance(
-                start.method_10216(), start.method_10214(), start.method_10215(),
+                start.getX(), start.getY(), start.getZ(),
                 candidateX, candidateY, candidateZ
         );
         boolean reachedEndpoint = startToTargetSq <= startToCandidateSq;
@@ -501,28 +504,28 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
             newRemaining = 0.0;
         }
 
-        double requestedDx = desiredX - start.method_10216();
-        double requestedDy = desiredY - start.method_10214();
-        double requestedDz = desiredZ - start.method_10215();
-        this.method_5784(class_1313.field_6308, new class_243(requestedDx, requestedDy, requestedDz));
+        double requestedDx = desiredX - start.getX();
+        double requestedDy = desiredY - start.getY();
+        double requestedDz = desiredZ - start.getZ();
+        this.move(MovementType.SELF, new Vec3d(requestedDx, requestedDy, requestedDz));
 
         // Keep the minecart on the rail centerline vertically even when the ascending rail's
         // support/front geometry would otherwise clip the generic entity movement.
         if (slope) {
-            class_243 actual = this.method_19538();
-            double distanceFromEndpoint = Math.hypot(targetX - actual.method_10216(), targetZ - actual.method_10215());
+            Vec3d actual = this.getPos();
+            double distanceFromEndpoint = Math.hypot(targetX - actual.getX(), targetZ - actual.getZ());
             double expectedY = targetY + (minecartspeedfeatures$ascends(horizontalVelocity, ordinal)
                     ? distanceFromEndpoint
                     : -distanceFromEndpoint);
-            if (actual.method_10214() < expectedY) {
-                this.method_33574(new class_243(actual.method_10216(), expectedY, actual.method_10215()));
+            if (actual.getY() < expectedY) {
+                this.setPosition(new Vec3d(actual.getX(), expectedY, actual.getZ()));
             }
         }
 
-        class_243 actual = this.method_19538();
+        Vec3d actual = this.getPos();
         double actualMoveSq = minecartspeedfeatures$squaredDistance(
-                start.method_10216(), start.method_10214(), start.method_10215(),
-                actual.method_10216(), actual.method_10214(), actual.method_10215()
+                start.getX(), start.getY(), start.getZ(),
+                actual.getX(), actual.getY(), actual.getZ()
         );
         double requestedMoveSq = requestedDx * requestedDx + requestedDy * requestedDy + requestedDz * requestedDz;
         if (requestedMoveSq > minecartspeedfeatures$EPSILON * minecartspeedfeatures$EPSILON
@@ -530,39 +533,39 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
             return new MoveResult(0.0, false, true, fy);
         }
 
-        this.method_18799(new class_243(tangentX, 0.0, tangentZ));
+        this.setVelocity(new Vec3d(tangentX, 0.0, tangentZ));
         return new MoveResult(newRemaining, reachedEndpoint, false, fy);
     }
 
     @Override
-    public class_243 minecartspeedfeatures$getVisualRideOffset(float tickDelta) {
+    public Vec3d minecartspeedfeatures$getVisualRideOffset(float tickDelta) {
         if (!this.minecartspeedfeatures$visualActive || this.minecartspeedfeatures$visualPath == null) {
-            return new class_243(0.0, 0.0, 0.0);
+            return new Vec3d(0.0, 0.0, 0.0);
         }
 
         double progress = this.minecartspeedfeatures$visualProgress(tickDelta);
-        class_243 desired = this.minecartspeedfeatures$visualPath.sample(progress);
-        class_243 baseline = minecartspeedfeatures$lerp(
+        Vec3d desired = this.minecartspeedfeatures$visualPath.sample(progress);
+        Vec3d baseline = minecartspeedfeatures$lerp(
                 this.minecartspeedfeatures$visualStart,
                 this.minecartspeedfeatures$visualTarget,
                 progress
         );
-        return new class_243(
-                desired.method_10216() - baseline.method_10216(),
-                desired.method_10214() - baseline.method_10214(),
-                desired.method_10215() - baseline.method_10215()
+        return new Vec3d(
+                desired.getX() - baseline.getX(),
+                desired.getY() - baseline.getY(),
+                desired.getZ() - baseline.getZ()
         );
     }
 
     @Override
-    public class_243 minecartspeedfeatures$getVisualBodyOffset(float tickDelta) {
+    public Vec3d minecartspeedfeatures$getVisualBodyOffset(float tickDelta) {
         if (!this.minecartspeedfeatures$visualActive || this.minecartspeedfeatures$visualPath == null) {
-            return new class_243(0.0, 0.0, 0.0);
+            return new Vec3d(0.0, 0.0, 0.0);
         }
 
         double progress = this.minecartspeedfeatures$visualProgress(tickDelta);
-        class_243 desired = this.minecartspeedfeatures$visualPath.sample(progress);
-        class_243 linear = minecartspeedfeatures$lerp(
+        Vec3d desired = this.minecartspeedfeatures$visualPath.sample(progress);
+        Vec3d linear = minecartspeedfeatures$lerp(
                 this.minecartspeedfeatures$visualStart,
                 this.minecartspeedfeatures$visualTarget,
                 progress
@@ -570,11 +573,11 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
 
         // MinecartEntityRenderer performs another rail snap after EntityRenderer's position
         // offset. Compensate for that existing snap instead of fighting or replacing it.
-        class_243 rendererAnchor = this.minecartspeedfeatures$rendererRailAnchor(linear);
-        return new class_243(
-                desired.method_10216() - rendererAnchor.method_10216(),
-                desired.method_10214() - rendererAnchor.method_10214(),
-                desired.method_10215() - rendererAnchor.method_10215()
+        Vec3d rendererAnchor = this.minecartspeedfeatures$rendererRailAnchor(linear);
+        return new Vec3d(
+                desired.getX() - rendererAnchor.getX(),
+                desired.getY() - rendererAnchor.getY(),
+                desired.getZ() - rendererAnchor.getZ()
         );
     }
 
@@ -586,9 +589,9 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         if (completed == 0) {
             return 0.0;
         }
-        double progress = (completed - 1.0 + Math.max(0.0, Math.min(1.0, tickDelta)))
+        double progress = (completed - 1.0 + Math.clamp(tickDelta, 0.0F, 1.0F))
                 / this.minecartspeedfeatures$visualTotalTicks;
-        return Math.max(0.0, Math.min(1.0, progress));
+        return Math.clamp(progress, 0.0, 1.0);
     }
 
     @Unique
@@ -602,16 +605,16 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     }
 
     @Unique
-    private VisualPath minecartspeedfeatures$buildVisualRailPath(class_243 start, class_243 target) {
+    private VisualPath minecartspeedfeatures$buildVisualRailPath(Vec3d start, Vec3d target) {
         // Do not convert an airborne server snapshot into a rail path just because a rail happens
         // to be one or two blocks below it. Vanilla's own snap routine is the authority for whether
         // each endpoint is actually associated with a rail. This preserves the 1.1.0-style
         // parabolic launch and ordinary off-rail gravity unchanged.
-        class_243 snappedStart = this.method_7508(
-                start.method_10216(), start.method_10214(), start.method_10215()
+        Vec3d snappedStart = this.snapPositionToRail(
+                start.getX(), start.getY(), start.getZ()
         );
-        class_243 snappedTarget = this.method_7508(
-                target.method_10216(), target.method_10214(), target.method_10215()
+        Vec3d snappedTarget = this.snapPositionToRail(
+                target.getX(), target.getY(), target.getZ()
         );
         if (snappedStart == null || snappedTarget == null) {
             return null;
@@ -623,13 +626,13 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
             return null;
         }
 
-        class_243 velocity = this.method_18798();
-        double dirX = velocity.method_10216();
-        double dirZ = velocity.method_10215();
+        Vec3d velocity = this.getVelocity();
+        double dirX = velocity.getX();
+        double dirZ = velocity.getZ();
         double dirLen = Math.hypot(dirX, dirZ);
         if (dirLen < minecartspeedfeatures$EPSILON) {
-            dirX = target.method_10216() - start.method_10216();
-            dirZ = target.method_10215() - start.method_10215();
+            dirX = target.getX() - start.getX();
+            dirZ = target.getZ() - start.getZ();
             dirLen = Math.hypot(dirX, dirZ);
         }
         if (dirLen < minecartspeedfeatures$EPSILON) {
@@ -638,7 +641,7 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         dirX /= dirLen;
         dirZ /= dirLen;
 
-        List<class_243> points = new ArrayList<>();
+        List<Vec3d> points = new ArrayList<>();
         points.add(start);
         RailRef rail = startRail;
         RailRef previous = null;
@@ -665,10 +668,10 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
             double outX = fx / horizontal;
             double outZ = fz / horizontal;
 
-            double boundaryX = rail.pos.method_10263() + 0.5 + fx * 0.5;
-            double boundaryZ = rail.pos.method_10260() + 0.5 + fz * 0.5;
-            class_243 boundary = this.minecartspeedfeatures$snapForVisualPath(
-                    boundaryX, rail.pos.method_10264() + 0.5, boundaryZ
+            double boundaryX = rail.pos.getX() + 0.5 + fx * 0.5;
+            double boundaryZ = rail.pos.getZ() + 0.5 + fz * 0.5;
+            Vec3d boundary = this.minecartspeedfeatures$snapForVisualPath(
+                    boundaryX, rail.pos.getY() + 0.5, boundaryZ
             );
             if (boundary == null) {
                 return null;
@@ -689,15 +692,15 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     }
 
     @Unique
-    private RailRef minecartspeedfeatures$findRailNear(class_243 point) {
-        int x = minecartspeedfeatures$floor(point.method_10216());
-        int y = minecartspeedfeatures$floor(point.method_10214());
-        int z = minecartspeedfeatures$floor(point.method_10215());
-        class_1937 world = this.method_37908();
+    private RailRef minecartspeedfeatures$findRailNear(Vec3d point) {
+        int x = minecartspeedfeatures$floor(point.getX());
+        int y = minecartspeedfeatures$floor(point.getY());
+        int z = minecartspeedfeatures$floor(point.getZ());
+        World world = this.getWorld();
         int[] offsets = {-1, 0, 1, -2, 2};
         for (int offset : offsets) {
-            class_2338 pos = new class_2338(x, y + offset, z);
-            class_2680 state = world.method_8320(pos);
+            BlockPos pos = new BlockPos(x, y + offset, z);
+            BlockState state = world.getBlockState(pos);
             RailRef ref = this.minecartspeedfeatures$railRef(pos, state);
             if (ref != null) {
                 return ref;
@@ -710,22 +713,22 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     private RailRef minecartspeedfeatures$findRailAhead(
             RailRef current,
             RailRef previous,
-            class_243 boundary,
+            Vec3d boundary,
             double dirX,
             double dirZ
     ) {
-        double probeX = boundary.method_10216() + dirX * 0.02;
-        double probeZ = boundary.method_10215() + dirZ * 0.02;
+        double probeX = boundary.getX() + dirX * 0.02;
+        double probeZ = boundary.getZ() + dirZ * 0.02;
         int x = minecartspeedfeatures$floor(probeX);
         int z = minecartspeedfeatures$floor(probeZ);
-        int baseY = minecartspeedfeatures$floor(boundary.method_10214());
-        class_1937 world = this.method_37908();
+        int baseY = minecartspeedfeatures$floor(boundary.getY());
+        World world = this.getWorld();
 
         RailRef best = null;
         double bestScore = Double.POSITIVE_INFINITY;
         for (int dy = -2; dy <= 2; dy++) {
-            class_2338 pos = new class_2338(x, baseY + dy, z);
-            class_2680 state = world.method_8320(pos);
+            BlockPos pos = new BlockPos(x, baseY + dy, z);
+            BlockState state = world.getBlockState(pos);
             RailRef candidate = this.minecartspeedfeatures$railRef(pos, state);
             if (candidate == null || candidate.pos.equals(current.pos)) {
                 continue;
@@ -736,7 +739,7 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
             if (!minecartspeedfeatures$railConnectsToward(candidate, current.pos)) {
                 continue;
             }
-            double score = Math.abs((candidate.pos.method_10264() + 0.5) - boundary.method_10214());
+            double score = Math.abs((candidate.pos.getY() + 0.5) - boundary.getY());
             if (score < bestScore) {
                 bestScore = score;
                 best = candidate;
@@ -746,41 +749,41 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     }
 
     @Unique
-    private static boolean minecartspeedfeatures$railConnectsToward(RailRef rail, class_2338 other) {
+    private static boolean minecartspeedfeatures$railConnectsToward(RailRef rail, BlockPos other) {
         int ordinal = rail.shape.ordinal();
-        int dx = other.method_10263() - rail.pos.method_10263();
-        int dz = other.method_10260() - rail.pos.method_10260();
+        int dx = other.getX() - rail.pos.getX();
+        int dz = other.getZ() - rail.pos.getZ();
         return (minecartspeedfeatures$endpointAX(ordinal) == dx && minecartspeedfeatures$endpointAZ(ordinal) == dz)
                 || (minecartspeedfeatures$endpointBX(ordinal) == dx && minecartspeedfeatures$endpointBZ(ordinal) == dz);
     }
 
     @Unique
-    private class_243 minecartspeedfeatures$snapForVisualPath(double x, double y, double z) {
-        class_243 snapped = this.method_7508(x, y, z);
+    private Vec3d minecartspeedfeatures$snapForVisualPath(double x, double y, double z) {
+        Vec3d snapped = this.snapPositionToRail(x, y, z);
         if (snapped != null) {
             return snapped;
         }
-        snapped = this.method_7508(x, y + 1.0, z);
+        snapped = this.snapPositionToRail(x, y + 1.0, z);
         if (snapped != null) {
             return snapped;
         }
-        return this.method_7508(x, y - 1.0, z);
+        return this.snapPositionToRail(x, y - 1.0, z);
     }
 
     @Unique
-    private class_243 minecartspeedfeatures$rendererRailAnchor(class_243 linear) {
-        class_243 center = this.method_7508(
-                linear.method_10216(), linear.method_10214(), linear.method_10215()
+    private Vec3d minecartspeedfeatures$rendererRailAnchor(Vec3d linear) {
+        Vec3d center = this.snapPositionToRail(
+                linear.getX(), linear.getY(), linear.getZ()
         );
         if (center == null) {
             return linear;
         }
 
-        class_243 ahead = this.method_7505(
-                linear.method_10216(), linear.method_10214(), linear.method_10215(), 0.3
+        Vec3d ahead = this.snapPositionToRailWithOffset(
+                linear.getX(), linear.getY(), linear.getZ(), 0.3
         );
-        class_243 behind = this.method_7505(
-                linear.method_10216(), linear.method_10214(), linear.method_10215(), -0.3
+        Vec3d behind = this.snapPositionToRailWithOffset(
+                linear.getX(), linear.getY(), linear.getZ(), -0.3
         );
         if (ahead == null) {
             ahead = center;
@@ -788,23 +791,25 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         if (behind == null) {
             behind = center;
         }
-        return new class_243(
-                center.method_10216(),
-                (ahead.method_10214() + behind.method_10214()) * 0.5,
-                center.method_10215()
+        return new Vec3d(
+                center.getX(),
+                (ahead.getY() + behind.getY()) * 0.5,
+                center.getZ()
         );
     }
 
     @Unique
-    private static class_243 minecartspeedfeatures$lerp(class_243 a, class_243 b, double t) {
-        return new class_243(
-                a.method_10216() + (b.method_10216() - a.method_10216()) * t,
-                a.method_10214() + (b.method_10214() - a.method_10214()) * t,
-                a.method_10215() + (b.method_10215() - a.method_10215()) * t
+    private static Vec3d minecartspeedfeatures$lerp(Vec3d a, Vec3d b, double t) {
+        return new Vec3d(
+                a.getX() + (b.getX() - a.getX()) * t,
+                a.getY() + (b.getY() - a.getY()) * t,
+                a.getZ() + (b.getZ() - a.getZ()) * t
         );
     }
 
-    /** Literal 1.1.0 launchFromRail transformation, using the old constants and branch logic. */
+    /**
+     * Literal 1.1.0 launchFromRail transformation, using the old constants and branch logic.
+     */
     @Unique
     private void minecartspeedfeatures$launchFromRail110() {
         if (this.minecartspeedfeatures$lastRail == null) {
@@ -812,114 +817,117 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
         }
 
         switch (this.minecartspeedfeatures$lastRail.ordinal()) {
-            case 2, 3 -> this.method_5762(
+            case 2, 3 -> this.addVelocity(
                     (this.minecartspeedfeatures$lastVelocity - 0.0078125)
-                            * Math.signum(this.method_18798().method_10216()),
-                    this.minecartspeedfeatures$lastVelocity * (this.method_23318() < this.field_6036 ? -1.0 : 1.0),
+                            * Math.signum(this.getVelocity().getX()),
+                    this.minecartspeedfeatures$lastVelocity * (this.getY() < this.prevY ? -1.0 : 1.0),
                     0.0
             );
-            case 4, 5 -> this.method_5762(
+            case 4, 5 -> this.addVelocity(
                     0.0,
-                    this.minecartspeedfeatures$lastVelocity * (this.method_23318() < this.field_6036 ? -1.0 : 1.0),
+                    this.minecartspeedfeatures$lastVelocity * (this.getY() < this.prevY ? -1.0 : 1.0),
                     (this.minecartspeedfeatures$lastVelocity - 0.0078125)
-                            * Math.signum(this.method_18798().method_10215())
+                            * Math.signum(this.getVelocity().getZ())
             );
-            default -> { }
+            default -> {
+            }
         }
 
-        class_243 launchedVelocity = this.method_18798();
-        class_243 launchedPosition = this.method_19538()
-                .method_1019(launchedVelocity.method_18805(0.0, 0.95, 0.0))
-                .method_1031(0.0, this.method_23318() < this.field_6036 ? 0.0 : 0.3, 0.0);
-        this.method_33574(launchedPosition);
-        this.method_22862();
-        this.method_23311();
-        this.field_5960 = false;
+        Vec3d launchedVelocity = this.getVelocity();
+        Vec3d launchedPosition = this.getPos()
+                .add(launchedVelocity.multiply(0.0, 0.95, 0.0))
+                .add(0.0, this.getY() < this.prevY ? 0.0 : 0.3, 0.0);
+        this.setPosition(launchedPosition);
+        this.resetPosition();
+        this.refreshPosition();
+        this.noClip = false;
     }
 
     @Unique
     private RailRef minecartspeedfeatures$findRailAtCart() {
-        int x = minecartspeedfeatures$floor(this.method_23317());
-        int y = minecartspeedfeatures$floor(this.method_23318());
-        int z = minecartspeedfeatures$floor(this.method_23321());
-        class_1937 world = this.method_37908();
+        int x = minecartspeedfeatures$floor(this.getX());
+        int y = minecartspeedfeatures$floor(this.getY());
+        int z = minecartspeedfeatures$floor(this.getZ());
+        World world = this.getWorld();
 
-        class_2338 belowPos = new class_2338(x, y - 1, z);
-        class_2680 belowState = world.method_8320(belowPos);
-        if (class_2241.method_9476(belowState)) {
+        BlockPos belowPos = new BlockPos(x, y - 1, z);
+        BlockState belowState = world.getBlockState(belowPos);
+        if (AbstractRailBlock.isRail(belowState)) {
             return this.minecartspeedfeatures$railRef(belowPos, belowState);
         }
 
-        class_2338 pos = new class_2338(x, y, z);
-        class_2680 state = world.method_8320(pos);
+        BlockPos pos = new BlockPos(x, y, z);
+        BlockState state = world.getBlockState(pos);
         return this.minecartspeedfeatures$railRef(pos, state);
     }
 
     @Unique
-    private RailRef minecartspeedfeatures$railRef(class_2338 pos, class_2680 state) {
-        if (!class_2241.method_9476(state)) {
+    private RailRef minecartspeedfeatures$railRef(BlockPos pos, BlockState state) {
+        if (!AbstractRailBlock.isRail(state)) {
             return null;
         }
-        class_2248 block = state.method_26204();
-        if (!(block instanceof class_2241 rail)) {
+        Block block = state.getBlock();
+        if (!(block instanceof AbstractRailBlock rail)) {
             return null;
         }
-        class_2768 shape = (class_2768) state.method_11654(rail.method_9474());
+        RailShape shape = state.get(rail.getShapeProperty());
         return new RailRef(pos, state, shape);
     }
 
     @Unique
-    private static boolean minecartspeedfeatures$isCopperRail(class_2680 state) {
+    private static boolean minecartspeedfeatures$isCopperRail(BlockState state) {
         // Optional integration without a class/link dependency on The Copper Rail. User-defined
         // class names are not remapped by Loom, so this stays stable for the 0.9.4 1.21.1 build.
-        return state.method_26204().getClass().getName().equals("com.thecopperrail.CopperRailBlock");
+        return state.getBlock().getClass().getName().equals("com.thecopperrail.CopperRailBlock");
     }
 
     @Unique
-    private boolean minecartspeedfeatures$willHitBlockAt(class_2338 pos) {
+    private boolean minecartspeedfeatures$willHitBlockAt(BlockPos pos) {
         // This helper intentionally invokes the target's private vanilla method through a shadow
         // surrogate generated below, keeping the stationary powered-rail kick vanilla-like.
-        return this.method_18803(pos);
+        return this.willHitBlockAt(pos);
     }
 
-    @Shadow(remap = false)
-    private boolean method_18803(class_2338 pos) {
+    @Shadow
+    private boolean willHitBlockAt(BlockPos pos) {
         throw new AssertionError();
     }
 
     @Unique
     private double minecartspeedfeatures$maxSpeedBlocksPerTick() {
         if (MinecartSpeedFeatures.MINECART_MAX_SPEED == null) {
-            return (this.method_5799() ? 4.0 : 8.0) / 20.0;
+            return (this.isTouchingWater() ? 4.0 : 8.0) / 20.0;
         }
-        double result = this.method_37908().method_8450().method_8356(MinecartSpeedFeatures.MINECART_MAX_SPEED) / 20.0;
-        if (this.method_5799()) {
+        double result = this.getWorld().getGameRules().getInt(MinecartSpeedFeatures.MINECART_MAX_SPEED) / 20.0;
+        if (this.isTouchingWater()) {
             result *= 0.5;
         }
         return result;
     }
 
     @Unique
-    private static boolean minecartspeedfeatures$isAscendingShape(class_2768 shape) {
+    private static boolean minecartspeedfeatures$isAscendingShape(RailShape shape) {
         int ordinal = shape.ordinal();
         return ordinal >= 2 && ordinal <= 5;
     }
 
-    /** Matches the newer controller's direction test (despite the counterintuitive name). */
+    /**
+     * Matches the newer controller's direction test (despite the counterintuitive name).
+     */
     @Unique
-    private static boolean minecartspeedfeatures$ascends(class_243 velocity, int shapeOrdinal) {
+    private static boolean minecartspeedfeatures$ascends(Vec3d velocity, int shapeOrdinal) {
         return switch (shapeOrdinal) {
-            case 2 -> velocity.method_10216() < 0.0;
-            case 3 -> velocity.method_10216() > 0.0;
-            case 4 -> velocity.method_10215() > 0.0;
-            case 5 -> velocity.method_10215() < 0.0;
+            case 2 -> velocity.getX() < 0.0;
+            case 3 -> velocity.getX() > 0.0;
+            case 4 -> velocity.getZ() > 0.0;
+            case 5 -> velocity.getZ() < 0.0;
             default -> false;
         };
     }
 
     @Unique
-    private static double minecartspeedfeatures$horizontalLength(class_243 velocity) {
-        return Math.hypot(velocity.method_10216(), velocity.method_10215());
+    private static double minecartspeedfeatures$horizontalLength(Vec3d velocity) {
+        return Math.hypot(velocity.getX(), velocity.getZ());
     }
 
     @Unique
@@ -940,33 +948,54 @@ public abstract class AbstractMinecartEntityMixin extends class_1297 implements 
     }
 
     // Endpoint geometry copied from the 1.21.2 ADJACENT_RAIL_POSITIONS_BY_SHAPE layout.
-    @Unique private static int minecartspeedfeatures$endpointAX(int o) { return switch (o) {
-        case 1, 2, 3 -> -1;
-        default -> 0;
-    }; }
-    @Unique private static int minecartspeedfeatures$endpointAY(int o) { return switch (o) {
-        case 2 -> -1;
-        case 5 -> -1;
-        default -> 0;
-    }; }
-    @Unique private static int minecartspeedfeatures$endpointAZ(int o) { return switch (o) {
-        case 0, 4, 8, 9 -> -1;
-        case 5 -> -1;
-        case 6, 7 -> 1;
-        default -> 0;
-    }; }
-    @Unique private static int minecartspeedfeatures$endpointBX(int o) { return switch (o) {
-        case 1, 2, 3, 6, 9 -> 1;
-        case 7, 8 -> -1;
-        default -> 0;
-    }; }
-    @Unique private static int minecartspeedfeatures$endpointBY(int o) { return switch (o) {
-        case 3, 4 -> -1;
-        default -> 0;
-    }; }
-    @Unique private static int minecartspeedfeatures$endpointBZ(int o) { return switch (o) {
-        case 0, 4, 5 -> 1;
-        default -> 0;
-    }; }
+    @Unique
+    private static int minecartspeedfeatures$endpointAX(int o) {
+        return switch (o) {
+            case 1, 2, 3 -> -1;
+            default -> 0;
+        };
+    }
+
+    @Unique
+    private static int minecartspeedfeatures$endpointAY(int o) {
+        return switch (o) {
+            case 2, 5 -> -1;
+            default -> 0;
+        };
+    }
+
+    @Unique
+    private static int minecartspeedfeatures$endpointAZ(int o) {
+        return switch (o) {
+            case 0, 4, 5, 8, 9 -> -1;
+            case 6, 7 -> 1;
+            default -> 0;
+        };
+    }
+
+    @Unique
+    private static int minecartspeedfeatures$endpointBX(int o) {
+        return switch (o) {
+            case 1, 2, 3, 6, 9 -> 1;
+            case 7, 8 -> -1;
+            default -> 0;
+        };
+    }
+
+    @Unique
+    private static int minecartspeedfeatures$endpointBY(int o) {
+        return switch (o) {
+            case 3, 4 -> -1;
+            default -> 0;
+        };
+    }
+
+    @Unique
+    private static int minecartspeedfeatures$endpointBZ(int o) {
+        return switch (o) {
+            case 0, 4, 5 -> 1;
+            default -> 0;
+        };
+    }
 
 }

@@ -2,33 +2,36 @@ package ilostmy_fish.interpolation;
 
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.class_243;
 
-/** Immutable, arc-length-parameterized polyline used only for visual interpolation. */
+import net.minecraft.util.math.Vec3d;
+
+/**
+ * Immutable, arc-length-parameterized polyline used only for visual interpolation.
+ */
 public final class VisualPath {
     private static final double EPSILON = 1.0E-7;
 
-    private final class_243[] points;
+    private final Vec3d[] points;
     private final double[] cumulativeLength;
     private final double totalLength;
 
-    private VisualPath(class_243[] points, double[] cumulativeLength, double totalLength) {
+    private VisualPath(Vec3d[] points, double[] cumulativeLength, double totalLength) {
         this.points = points;
         this.cumulativeLength = cumulativeLength;
         this.totalLength = totalLength;
     }
 
-    public static VisualPath create(List<class_243> input) {
+    public static VisualPath create(List<Vec3d> input) {
         if (input == null || input.size() < 2) {
             return null;
         }
 
-        ArrayList<class_243> deduplicated = new ArrayList<>(input.size());
-        for (class_243 point : input) {
+        ArrayList<Vec3d> deduplicated = new ArrayList<>(input.size());
+        for (Vec3d point : input) {
             if (point == null) {
                 continue;
             }
-            if (deduplicated.isEmpty() || distance(deduplicated.get(deduplicated.size() - 1), point) > EPSILON) {
+            if (deduplicated.isEmpty() || distance(deduplicated.getLast(), point) > EPSILON) {
                 deduplicated.add(point);
             }
         }
@@ -38,19 +41,19 @@ public final class VisualPath {
 
         // Remove points that add no geometric information. A long straight or constant slope then
         // becomes start/end only, while bends and slope transitions retain their control points.
-        ArrayList<class_243> simplified = new ArrayList<>(deduplicated.size());
-        simplified.add(deduplicated.get(0));
+        ArrayList<Vec3d> simplified = new ArrayList<>(deduplicated.size());
+        simplified.add(deduplicated.getFirst());
         for (int i = 1; i < deduplicated.size() - 1; i++) {
-            class_243 a = simplified.get(simplified.size() - 1);
-            class_243 b = deduplicated.get(i);
-            class_243 c = deduplicated.get(i + 1);
+            Vec3d a = simplified.getLast();
+            Vec3d b = deduplicated.get(i);
+            Vec3d c = deduplicated.get(i + 1);
             if (!collinearForward(a, b, c)) {
                 simplified.add(b);
             }
         }
-        simplified.add(deduplicated.get(deduplicated.size() - 1));
+        simplified.add(deduplicated.getLast());
 
-        class_243[] points = simplified.toArray(new class_243[0]);
+        Vec3d[] points = simplified.toArray(new Vec3d[0]);
         double[] cumulative = new double[points.length];
         double total = 0.0;
         for (int i = 1; i < points.length; i++) {
@@ -60,7 +63,7 @@ public final class VisualPath {
         return total <= EPSILON ? null : new VisualPath(points, cumulative, total);
     }
 
-    public class_243 sample(double progress) {
+    public Vec3d sample(double progress) {
         if (progress <= 0.0) {
             return points[0];
         }
@@ -88,17 +91,13 @@ public final class VisualPath {
         return lerp(points[start], points[end], local);
     }
 
-    public int pointCount() {
-        return points.length;
-    }
-
-    private static boolean collinearForward(class_243 a, class_243 b, class_243 c) {
-        double abx = b.method_10216() - a.method_10216();
-        double aby = b.method_10214() - a.method_10214();
-        double abz = b.method_10215() - a.method_10215();
-        double bcx = c.method_10216() - b.method_10216();
-        double bcy = c.method_10214() - b.method_10214();
-        double bcz = c.method_10215() - b.method_10215();
+    private static boolean collinearForward(Vec3d a, Vec3d b, Vec3d c) {
+        double abx = b.getX() - a.getX();
+        double aby = b.getY() - a.getY();
+        double abz = b.getZ() - a.getZ();
+        double bcx = c.getX() - b.getX();
+        double bcy = c.getY() - b.getY();
+        double bcz = c.getZ() - b.getZ();
         double ab = Math.sqrt(abx * abx + aby * aby + abz * abz);
         double bc = Math.sqrt(bcx * bcx + bcy * bcy + bcz * bcz);
         if (ab <= EPSILON || bc <= EPSILON) {
@@ -119,18 +118,18 @@ public final class VisualPath {
         return dot > 0.999999 && crossSq < 1.0E-10;
     }
 
-    private static class_243 lerp(class_243 a, class_243 b, double t) {
-        return new class_243(
-                a.method_10216() + (b.method_10216() - a.method_10216()) * t,
-                a.method_10214() + (b.method_10214() - a.method_10214()) * t,
-                a.method_10215() + (b.method_10215() - a.method_10215()) * t
+    private static Vec3d lerp(Vec3d a, Vec3d b, double t) {
+        return new Vec3d(
+                a.getX() + (b.getX() - a.getX()) * t,
+                a.getY() + (b.getY() - a.getY()) * t,
+                a.getZ() + (b.getZ() - a.getZ()) * t
         );
     }
 
-    private static double distance(class_243 a, class_243 b) {
-        double x = b.method_10216() - a.method_10216();
-        double y = b.method_10214() - a.method_10214();
-        double z = b.method_10215() - a.method_10215();
+    private static double distance(Vec3d a, Vec3d b) {
+        double x = b.getX() - a.getX();
+        double y = b.getY() - a.getY();
+        double z = b.getZ() - a.getZ();
         return Math.sqrt(x * x + y * y + z * z);
     }
 }
