@@ -6,7 +6,10 @@
   "mixins": [
     "GameRulesMixin",
     "GameRulesIntRuleInvoker",
-    "AbstractMinecartEntityMixin"
+    "MinecartRailTraversalMixin",
+    "MinecartSpeedMixin",
+    "MinecartLaunchMixin",
+    "MinecartVisualInterpolationMixin"
   ],
   "injectors": {
     "defaultRequire": 1
