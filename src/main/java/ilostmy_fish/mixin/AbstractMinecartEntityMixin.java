@@ -3,6 +3,7 @@ package ilostmy_fish.mixin;
 import ilostmy_fish.MinecartSpeedFeatures;
 import ilostmy_fish.interpolation.VisualInterpolationAccess;
 import ilostmy_fish.interpolation.VisualPath;
+import ilostmy_fish.physics.LaunchPhysics;
 import ilostmy_fish.rail.MoveIteration;
 import ilostmy_fish.rail.MoveResult;
 import ilostmy_fish.rail.RailRef;
@@ -79,11 +80,11 @@ public abstract class AbstractMinecartEntityMixin extends Entity implements Visu
     @Unique
     private RailShape minecartspeedfeatures$lastRail;
 
-    /**
-     * Exact 1.1.0 update formula: sqrt(velocity.length()) / 2 * 0.95.
-     */
+    /** Launch impulse retained from the preceding rail tick. */
     @Unique
     private double minecartspeedfeatures$lastVelocity;
+    @Unique
+    private boolean minecartspeedfeatures$hasLastVelocity;
 
     protected AbstractMinecartEntityMixin(EntityType<?> type, World world) {
         super(type, world);
@@ -165,9 +166,17 @@ public abstract class AbstractMinecartEntityMixin extends Entity implements Visu
         Vec3d initialVelocity = this.getVelocity();
         double preRailYVelocity = initialVelocity.getY();
         double previousLastVelocity = this.minecartspeedfeatures$lastVelocity;
+        boolean hasPreviousLastVelocity = this.minecartspeedfeatures$hasLastVelocity;
         // Tick-level launch history is sampled exactly once per real server tick. Rail traversal
         // iterations are movement resolution, not pseudo-ticks.
-        this.minecartspeedfeatures$lastVelocity = Math.sqrt(initialVelocity.length()) / 2.0 * 0.95;
+        double currentLaunchVelocity = LaunchPhysics.calculateLaunchSpeed(initialVelocity.length());
+        double transitionLaunchVelocity = LaunchPhysics.selectTransitionLaunchSpeed(
+                currentLaunchVelocity,
+                previousLastVelocity,
+                hasPreviousLastVelocity
+        );
+        this.minecartspeedfeatures$lastVelocity = currentLaunchVelocity;
+        this.minecartspeedfeatures$hasLastVelocity = true;
         this.onLanding();
 
         MoveIteration iteration = new MoveIteration();
@@ -229,8 +238,9 @@ public abstract class AbstractMinecartEntityMixin extends Entity implements Visu
                 // ADJACENT_RAIL_POSITIONS_BY_SHAPE stores the upper endpoint with dy == 0.
                 // Launch only when leaving that upper endpoint, not when descending off the low end.
                 if (minecartspeedfeatures$isAscendingShape(shape) && result.forwardDy == 0) {
-                    // 1.1.0 does not update lastVelocity on the launch-transition branch.
-                    this.minecartspeedfeatures$lastVelocity = previousLastVelocity;
+                    // Preserve the preceding tick's launch sample when one exists. A newly created
+                    // cart has no history, so its current sample is the only valid launch state.
+                    this.minecartspeedfeatures$lastVelocity = transitionLaunchVelocity;
                     // The old transition fires after one gravity application but before off-rail
                     // movement. Restore that tick-level Y velocity; the launch routine below is
                     // then the literal 1.1.0 additive transform.
