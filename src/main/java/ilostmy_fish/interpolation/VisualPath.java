@@ -6,19 +6,23 @@ import java.util.List;
 import net.minecraft.util.math.Vec3d;
 
 /**
- * Immutable, arc-length-parameterized polyline used only for visual interpolation.
+ * Immutable 3D polyline parameterized by horizontal travel distance.
+ *
+ * <p>The authoritative rail traversal consumes tick time from XZ displacement, so slope height
+ * must not make an ascending segment consume more interpolation time than a flat segment with the
+ * same horizontal span.</p>
  */
 public final class VisualPath {
     private static final double EPSILON = 1.0E-7;
 
     private final Vec3d[] points;
-    private final double[] cumulativeLength;
-    private final double totalLength;
+    private final double[] cumulativeTravel;
+    private final double totalTravel;
 
-    private VisualPath(Vec3d[] points, double[] cumulativeLength, double totalLength) {
+    private VisualPath(Vec3d[] points, double[] cumulativeTravel, double totalTravel) {
         this.points = points;
-        this.cumulativeLength = cumulativeLength;
-        this.totalLength = totalLength;
+        this.cumulativeTravel = cumulativeTravel;
+        this.totalTravel = totalTravel;
     }
 
     public static VisualPath create(List<Vec3d> input) {
@@ -31,7 +35,8 @@ public final class VisualPath {
             if (point == null) {
                 continue;
             }
-            if (deduplicated.isEmpty() || distance(deduplicated.getLast(), point) > EPSILON) {
+            if (deduplicated.isEmpty()
+                    || spatialDistance(deduplicated.getLast(), point) > EPSILON) {
                 deduplicated.add(point);
             }
         }
@@ -54,13 +59,22 @@ public final class VisualPath {
         simplified.add(deduplicated.getLast());
 
         Vec3d[] points = simplified.toArray(new Vec3d[0]);
-        double[] cumulative = new double[points.length];
-        double total = 0.0;
+        double[] cumulativeTravel = new double[points.length];
+        double totalTravel = 0.0;
         for (int i = 1; i < points.length; i++) {
-            total += distance(points[i - 1], points[i]);
-            cumulative[i] = total;
+            double segmentTravel = travelDistance(points[i - 1], points[i]);
+            if (segmentTravel <= EPSILON) {
+                // A spatially meaningful vertical-only segment cannot be represented by the
+                // horizontal clock. Let the caller fall back to vanilla interpolation instead of
+                // introducing an instantaneous vertical jump.
+                return null;
+            }
+            totalTravel += segmentTravel;
+            cumulativeTravel[i] = totalTravel;
         }
-        return total <= EPSILON ? null : new VisualPath(points, cumulative, total);
+        return totalTravel <= EPSILON
+                ? null
+                : new VisualPath(points, cumulativeTravel, totalTravel);
     }
 
     public Vec3d sample(double progress) {
@@ -71,12 +85,12 @@ public final class VisualPath {
             return points[points.length - 1];
         }
 
-        double targetDistance = totalLength * progress;
+        double targetTravel = totalTravel * progress;
         int low = 1;
-        int high = cumulativeLength.length - 1;
+        int high = cumulativeTravel.length - 1;
         while (low < high) {
             int mid = (low + high) >>> 1;
-            if (cumulativeLength[mid] < targetDistance) {
+            if (cumulativeTravel[mid] < targetTravel) {
                 low = mid + 1;
             } else {
                 high = mid;
@@ -85,9 +99,11 @@ public final class VisualPath {
 
         int end = low;
         int start = end - 1;
-        double segmentStart = cumulativeLength[start];
-        double segmentLength = cumulativeLength[end] - segmentStart;
-        double local = segmentLength <= EPSILON ? 1.0 : (targetDistance - segmentStart) / segmentLength;
+        double segmentStart = cumulativeTravel[start];
+        double segmentTravel = cumulativeTravel[end] - segmentStart;
+        double local = segmentTravel <= EPSILON
+                ? 1.0
+                : (targetTravel - segmentStart) / segmentTravel;
         return lerp(points[start], points[end], local);
     }
 
@@ -126,10 +142,16 @@ public final class VisualPath {
         );
     }
 
-    private static double distance(Vec3d a, Vec3d b) {
+    private static double spatialDistance(Vec3d a, Vec3d b) {
         double x = b.getX() - a.getX();
         double y = b.getY() - a.getY();
         double z = b.getZ() - a.getZ();
         return Math.sqrt(x * x + y * y + z * z);
+    }
+
+    private static double travelDistance(Vec3d a, Vec3d b) {
+        double x = b.getX() - a.getX();
+        double z = b.getZ() - a.getZ();
+        return Math.hypot(x, z);
     }
 }
