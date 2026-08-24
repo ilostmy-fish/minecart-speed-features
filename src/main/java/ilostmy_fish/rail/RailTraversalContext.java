@@ -77,8 +77,8 @@ public final class RailTraversalContext {
         return this.movementBudget.hasTimeRemaining();
     }
 
-    public double remainingTime() {
-        return this.movementBudget.remainingTime();
+    public double elapsedTime() {
+        return 1.0 - this.movementBudget.remainingTime();
     }
 
     @Nullable

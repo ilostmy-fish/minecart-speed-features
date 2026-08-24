@@ -4,6 +4,9 @@
   "package": "ilostmy_fish.client.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "MinecartClientTrajectoryMixin",
+    "MinecartEntityRendererMixin",
+    "EntityRenderDispatcherMixin",
     "EntityRendererMixin",
     "CameraMixin"
   ],

@@ -1,10 +1,13 @@
 package ilostmy_fish.mixin;
 
+import ilostmy_fish.network.MinecartTrajectoryNetworking;
 import ilostmy_fish.rail.RailEndpoint;
 import ilostmy_fish.rail.RailRef;
 import ilostmy_fish.rail.RailResolver;
 import ilostmy_fish.rail.RailTraversalContext;
 import ilostmy_fish.rail.RailTraversalListener;
+import ilostmy_fish.trajectory.MinecartTrajectory;
+import ilostmy_fish.trajectory.ServerTrajectoryBuilder;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.PoweredRailBlock;
@@ -14,6 +17,7 @@ import net.minecraft.entity.vehicle.AbstractMinecartEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
+import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -35,6 +39,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class MinecartRailTraversalMixin extends Entity {
     @Unique
     private static final int minecartspeedfeatures$MAX_RAILS_PER_TICK = 4096;
+    @Unique
+    private static final double minecartspeedfeatures$ORIENTATION_SAMPLE_OFFSET = 0.3;
+    @Unique
+    private static final double minecartspeedfeatures$ORIENTATION_EPSILON_SQUARED = 1.0E-18;
 
     @Shadow
     private boolean onRail;
@@ -48,11 +56,48 @@ public abstract class MinecartRailTraversalMixin extends Entity {
     @Shadow
     public abstract void onActivatorRail(int x, int y, int z, boolean powered);
 
+    @Shadow
+    @Nullable
+    public abstract Vec3d snapPositionToRailWithOffset(
+            double x,
+            double y,
+            double z,
+            double offset
+    );
+
     @Unique
     private RailTraversalContext minecartspeedfeatures$traversal;
+    @Unique
+    private ServerTrajectoryBuilder minecartspeedfeatures$trajectoryBuilder;
 
     protected MinecartRailTraversalMixin(EntityType<?> type, World world) {
         super(type, world);
+    }
+
+    @Inject(method = "tick()V", at = @At("HEAD"))
+    private void minecartspeedfeatures$beginTrajectoryTick(CallbackInfo ci) {
+        if (!this.getWorld().isClient) {
+            this.minecartspeedfeatures$trajectoryBuilder = new ServerTrajectoryBuilder(
+                    this.getWorld().getTime(),
+                    this.getPos(),
+                    this.minecartspeedfeatures$getOrientationHint()
+            );
+        }
+    }
+
+    @Inject(method = "tick()V", at = @At("TAIL"))
+    private void minecartspeedfeatures$sendTrajectory(CallbackInfo ci) {
+        ServerTrajectoryBuilder builder = this.minecartspeedfeatures$trajectoryBuilder;
+        this.minecartspeedfeatures$trajectoryBuilder = null;
+        if (builder == null || this.isRemoved()) {
+            return;
+        }
+
+        MinecartTrajectory trajectory = builder.finish(this.getPos(), this.getVelocity());
+        MinecartTrajectoryNetworking.send(
+                (AbstractMinecartEntity)(Object)this,
+                trajectory
+        );
     }
 
     @Redirect(
@@ -67,6 +112,7 @@ public abstract class MinecartRailTraversalMixin extends Entity {
             BlockPos initialPos,
             BlockState initialState
     ) {
+        ServerTrajectoryBuilder trajectoryBuilder = this.minecartspeedfeatures$trajectoryBuilder;
         RailRef vanillaRail = RailResolver.from(initialPos, initialState);
         if (vanillaRail == null) {
             // This should be unreachable because tick checked AbstractRailBlock.isRail first. Keep
@@ -100,7 +146,7 @@ public abstract class MinecartRailTraversalMixin extends Entity {
                 listener.minecartspeedfeatures$beginRailTraversal(this.getVelocity());
             }
 
-            while (rail != null && traversal.hasTimeRemaining()
+            while (traversal.hasTimeRemaining()
                     && visitedRails < minecartspeedfeatures$MAX_RAILS_PER_TICK) {
                 traversal.beginSegment(rail);
 
@@ -108,6 +154,13 @@ public abstract class MinecartRailTraversalMixin extends Entity {
                 // hooks from Copper Rail and other rail mods run on every iteration.
                 this.moveOnRail(rail.pos(), rail.state());
                 visitedRails++;
+
+                if (trajectoryBuilder != null) {
+                    trajectoryBuilder.record(
+                            traversal.elapsedTime(),
+                            this.getPos()
+                    );
+                }
 
                 this.minecartspeedfeatures$activateRail(rail);
                 if (this.isRemoved() || !traversal.interceptedMovement()
@@ -229,5 +282,47 @@ public abstract class MinecartRailTraversalMixin extends Entity {
                 pos.getZ(),
                 rail.state().get(PoweredRailBlock.POWERED)
         );
+    }
+
+    @Unique
+    private Vec3d minecartspeedfeatures$getOrientationHint() {
+        Vec3d preferredDirection = this.getVelocity();
+        if (preferredDirection.lengthSquared()
+                <= minecartspeedfeatures$ORIENTATION_EPSILON_SQUARED) {
+            double yaw = Math.toRadians(this.getYaw());
+            // Minecart yaw is measured from the model's rail axis rather than Entity's usual
+            // look-vector convention. This conversion reproduces the renderer's facing.
+            preferredDirection = new Vec3d(-Math.cos(yaw), 0.0, -Math.sin(yaw));
+        }
+
+        Vec3d position = this.getPos();
+        Vec3d forward = this.snapPositionToRailWithOffset(
+                position.getX(),
+                position.getY(),
+                position.getZ(),
+                minecartspeedfeatures$ORIENTATION_SAMPLE_OFFSET
+        );
+        Vec3d backward = this.snapPositionToRailWithOffset(
+                position.getX(),
+                position.getY(),
+                position.getZ(),
+                -minecartspeedfeatures$ORIENTATION_SAMPLE_OFFSET
+        );
+        if (forward == null || backward == null) {
+            return preferredDirection;
+        }
+
+        Vec3d tangent = forward.subtract(backward);
+        if (!Double.isFinite(tangent.getX())
+                || !Double.isFinite(tangent.getY())
+                || !Double.isFinite(tangent.getZ())
+                || tangent.lengthSquared()
+                        <= minecartspeedfeatures$ORIENTATION_EPSILON_SQUARED) {
+            return preferredDirection;
+        }
+        if (tangent.dotProduct(preferredDirection) < 0.0) {
+            tangent = tangent.multiply(-1.0);
+        }
+        return tangent;
     }
 }

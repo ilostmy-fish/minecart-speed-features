@@ -3,13 +3,21 @@
   "id": "minecart-speed-features",
   "version": "${version}",
   "name": "Minecart Speed Features",
-  "description": "Standalone 1.21.1 high-speed minecart rail traversal with reconstructed client rail-path interpolation.",
+  "description": "High-speed minecart traversal with server-authored client trajectories.",
   "authors": [
     "ilostmy_fish"
   ],
   "license": "CC0-1.0",
   "icon": "assets/minecart-speed-features/icon.png",
   "environment": "*",
+  "entrypoints": {
+    "main": [
+      "ilostmy_fish.MinecartSpeedFeatures"
+    ],
+    "client": [
+      "ilostmy_fish.client.MinecartSpeedFeaturesClient"
+    ]
+  },
   "mixins": [
     "minecart-speed-features.mixins.json",
     {
@@ -19,6 +27,7 @@
   ],
   "depends": {
     "fabricloader": ">=0.19.3",
+    "fabric-api": "*",
     "minecraft": "~1.21.1",
     "java": ">=21"
   }
