@@ -13,7 +13,9 @@ import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 
-/** Keeps the existing 1.1.0-style ascending-rail launch as a traversal exit feature. */
+/**
+ * Keeps the existing 1.1.0-style ascending-rail launch as a traversal exit feature.
+ */
 @Mixin(AbstractMinecartEntity.class)
 public abstract class MinecartLaunchMixin extends Entity implements RailTraversalListener {
     @Unique
@@ -77,12 +79,9 @@ public abstract class MinecartLaunchMixin extends Entity implements RailTraversa
             }
         }
 
-        Vec3d launchedPosition = this.getPos()
-                .add(this.getVelocity().multiply(0.0, 0.95, 0.0))
-                .add(0.0, this.getY() < this.prevY ? 0.0 : 0.3, 0.0);
-        this.setPosition(launchedPosition);
-        this.resetPosition();
-        this.refreshPosition();
+        // Start airborne motion from the actual rail endpoint. The old 1.1.0 launch code moved
+        // the cart upward by 0.95 * Y velocity (+0.3 while ascending), which creates a vertical
+        // segment in the authoritative trajectory at high speeds.
         this.noClip = false;
     }
 }
