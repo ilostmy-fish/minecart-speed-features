@@ -189,7 +189,7 @@ public abstract class MinecartCollisionMixin extends Entity {
                 entity -> entity instanceof LivingEntity living
                         && !(living instanceof PlayerEntity)
                         && living.isAlive()
-                        && !living.isPassenger()
+                        && !living.hasVehicle()
                         && !this.minecartspeedfeatures$isPassingThrough(living)
                         && this.collidesWith(living)
         );
