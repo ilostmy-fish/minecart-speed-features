@@ -1,6 +1,5 @@
 package ilostmy_fish.network;
 
-import ilostmy_fish.MinecartSpeedFeatures;
 import ilostmy_fish.trajectory.MinecartTrajectory;
 import ilostmy_fish.trajectory.TrajectoryPoint;
 import ilostmy_fish.trajectory.TrajectoryStreamPhase;
@@ -26,8 +25,8 @@ public record MinecartTrajectoryPayload(
     private static final int KNOWN_FLAGS = PHASE_MASK | HAS_ORIENTATION;
 
     public static final Id<MinecartTrajectoryPayload> ID = new Id<>(Identifier.of(
-            MinecartSpeedFeatures.MOD_ID,
-            "minecart_trajectory"
+            "msf",
+            "traj"
     ));
     public static final PacketCodec<RegistryByteBuf, MinecartTrajectoryPayload> CODEC =
             PacketCodec.ofStatic(MinecartTrajectoryPayload::write, MinecartTrajectoryPayload::read);
