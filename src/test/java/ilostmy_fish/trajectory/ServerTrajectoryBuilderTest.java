@@ -4,7 +4,9 @@ import net.minecraft.util.math.Vec3d;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServerTrajectoryBuilderTest {
     private static final double TOLERANCE = 1.0E-12;
@@ -92,6 +94,32 @@ class ServerTrajectoryBuilderTest {
 
         assertEquals(northSouth, trajectory.orientationHint());
         assertEquals(northSouth, trajectory.sample(0.5).tangent());
+    }
+
+    @Test
+    void stationaryPathAndVelocityAreNotMeaningfulMotion() {
+        ServerTrajectoryBuilder builder = builder(16L);
+
+        assertFalse(builder.hasMeaningfulMotion(Vec3d.ZERO, Vec3d.ZERO));
+    }
+
+    @Test
+    void finalVelocityMakesAnOtherwiseStationaryTickMeaningful() {
+        ServerTrajectoryBuilder builder = builder(17L);
+
+        assertTrue(builder.hasMeaningfulMotion(
+                Vec3d.ZERO,
+                new Vec3d(0.1, 0.0, 0.0)
+        ));
+    }
+
+    @Test
+    void intermediateTravelIsMeaningfulWhenTheEndpointsMatch() {
+        ServerTrajectoryBuilder builder = builder(18L);
+        builder.record(0.25, new Vec3d(1.0, 0.0, 0.0));
+        builder.record(0.5, Vec3d.ZERO);
+
+        assertTrue(builder.hasMeaningfulMotion(Vec3d.ZERO, Vec3d.ZERO));
     }
 
     private static ServerTrajectoryBuilder builder(long serverTick) {
