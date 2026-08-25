@@ -58,8 +58,8 @@ public record MinecartTrajectoryPayload(
             buffer.writeFloat((float)point.timeFraction());
             writeRelativeVec3f(buffer, startPosition, point.position());
         }
-        writeVec3d(buffer, points.getLast().position());
-        writeVec3d(buffer, trajectory.finalVelocity());
+        writeRelativeVec3f(buffer, startPosition, points.getLast().position());
+        writeVec3f(buffer, trajectory.finalVelocity());
         if (hasOrientation) {
             writeVec3f(buffer, trajectory.orientationHint());
         }
@@ -87,8 +87,8 @@ public record MinecartTrajectoryPayload(
                     readRelativeVec3f(buffer, startPosition)
             ));
         }
-        points.add(new TrajectoryPoint(1.0, readVec3d(buffer)));
-        Vec3d finalVelocity = readVec3d(buffer);
+        points.add(new TrajectoryPoint(1.0, readRelativeVec3f(buffer, startPosition)));
+        Vec3d finalVelocity = readVec3f(buffer);
         Vec3d orientationHint = (flags & HAS_ORIENTATION) != 0
                 ? readVec3f(buffer)
                 : Vec3d.ZERO;
