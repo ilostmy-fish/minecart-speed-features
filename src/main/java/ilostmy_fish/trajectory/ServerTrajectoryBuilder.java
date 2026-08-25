@@ -10,6 +10,7 @@ import java.util.Objects;
 public final class ServerTrajectoryBuilder {
     private static final double TIME_EPSILON = 1.0E-9;
     private static final double POSITION_TOLERANCE_SQUARED = 1.0E-10;
+    private static final double VELOCITY_TOLERANCE_SQUARED = 1.0E-10;
 
     private final long serverTick;
     private final Vec3d orientationHint;
@@ -43,13 +44,39 @@ public final class ServerTrajectoryBuilder {
     }
 
     public MinecartTrajectory finish(Vec3d endPosition, Vec3d finalVelocity) {
+        return this.finish(endPosition, finalVelocity, this.orientationHint);
+    }
+
+    public MinecartTrajectory finish(
+            Vec3d endPosition,
+            Vec3d finalVelocity,
+            Vec3d orientationHint
+    ) {
         this.points.add(new TrajectoryPoint(1.0, Objects.requireNonNull(endPosition)));
         return new MinecartTrajectory(
                 this.serverTick,
                 simplify(this.points),
                 Objects.requireNonNull(finalVelocity),
-                this.orientationHint
+                Objects.requireNonNull(orientationHint)
         );
+    }
+
+    /**
+     * Detects movement from the recorded path, including intermediate travel that returns to the
+     * starting point. A nonzero final velocity also keeps the stream open for imminent motion.
+     */
+    public boolean hasMeaningfulMotion(Vec3d endPosition, Vec3d finalVelocity) {
+        Vec3d startPosition = this.points.getFirst().position();
+        for (int index = 1; index < this.points.size(); index++) {
+            if (this.points.get(index).position().squaredDistanceTo(startPosition)
+                    > POSITION_TOLERANCE_SQUARED) {
+                return true;
+            }
+        }
+        return Objects.requireNonNull(endPosition).squaredDistanceTo(startPosition)
+                        > POSITION_TOLERANCE_SQUARED
+                || Objects.requireNonNull(finalVelocity).lengthSquared()
+                        > VELOCITY_TOLERANCE_SQUARED;
     }
 
     private static List<TrajectoryPoint> simplify(List<TrajectoryPoint> input) {

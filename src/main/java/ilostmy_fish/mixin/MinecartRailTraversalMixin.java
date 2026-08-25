@@ -8,12 +8,15 @@ import ilostmy_fish.rail.RailTraversalContext;
 import ilostmy_fish.rail.RailTraversalListener;
 import ilostmy_fish.trajectory.MinecartTrajectory;
 import ilostmy_fish.trajectory.ServerTrajectoryBuilder;
+import ilostmy_fish.trajectory.TrajectoryStreamPhase;
+import ilostmy_fish.trajectory.TrajectoryStreamState;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.PoweredRailBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.vehicle.AbstractMinecartEntity;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
@@ -26,6 +29,13 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Replaces the tick's single rail dispatch with a rail-by-rail traversal.
@@ -69,6 +79,10 @@ public abstract class MinecartRailTraversalMixin extends Entity {
     private RailTraversalContext minecartspeedfeatures$traversal;
     @Unique
     private ServerTrajectoryBuilder minecartspeedfeatures$trajectoryBuilder;
+    @Unique
+    private List<ServerPlayerEntity> minecartspeedfeatures$trajectoryRecipients;
+    @Unique
+    private Map<UUID, TrajectoryStreamState> minecartspeedfeatures$trajectoryStreams;
 
     protected MinecartRailTraversalMixin(EntityType<?> type, World world) {
         super(type, world);
@@ -76,28 +90,83 @@ public abstract class MinecartRailTraversalMixin extends Entity {
 
     @Inject(method = "tick()V", at = @At("HEAD"))
     private void minecartspeedfeatures$beginTrajectoryTick(CallbackInfo ci) {
-        if (!this.getWorld().isClient) {
-            this.minecartspeedfeatures$trajectoryBuilder = new ServerTrajectoryBuilder(
-                    this.getWorld().getTime(),
-                    this.getPos(),
-                    this.minecartspeedfeatures$getOrientationHint()
-            );
+        if (this.getWorld().isClient) {
+            return;
         }
+
+        AbstractMinecartEntity minecart = (AbstractMinecartEntity)(Object)this;
+        List<ServerPlayerEntity> recipients = MinecartTrajectoryNetworking.trackingRecipients(
+                minecart
+        );
+        this.minecartspeedfeatures$trajectoryRecipients = recipients;
+        if (recipients.isEmpty()) {
+            this.minecartspeedfeatures$trajectoryBuilder = null;
+            this.minecartspeedfeatures$trajectoryStreams = null;
+            return;
+        }
+
+        // Orientation sampling is deliberately deferred until this tick has something to send.
+        this.minecartspeedfeatures$trajectoryBuilder = new ServerTrajectoryBuilder(
+                this.getWorld().getTime(),
+                this.getPos()
+        );
     }
 
     @Inject(method = "tick()V", at = @At("TAIL"))
     private void minecartspeedfeatures$sendTrajectory(CallbackInfo ci) {
         ServerTrajectoryBuilder builder = this.minecartspeedfeatures$trajectoryBuilder;
         this.minecartspeedfeatures$trajectoryBuilder = null;
-        if (builder == null || this.isRemoved()) {
+        List<ServerPlayerEntity> recipients = this.minecartspeedfeatures$trajectoryRecipients;
+        this.minecartspeedfeatures$trajectoryRecipients = null;
+        if (builder == null || recipients == null || recipients.isEmpty() || this.isRemoved()) {
             return;
         }
 
-        MinecartTrajectory trajectory = builder.finish(this.getPos(), this.getVelocity());
-        MinecartTrajectoryNetworking.send(
-                (AbstractMinecartEntity)(Object)this,
-                trajectory
+        Map<UUID, TrajectoryStreamState> streams = this.minecartspeedfeatures$trajectoryStreams;
+        if (streams == null) {
+            streams = new HashMap<>();
+            this.minecartspeedfeatures$trajectoryStreams = streams;
+        }
+        Set<UUID> currentRecipients = new HashSet<>(recipients.size());
+        for (ServerPlayerEntity player : recipients) {
+            UUID playerId = player.getUuid();
+            currentRecipients.add(playerId);
+            streams.computeIfAbsent(playerId, ignored -> new TrajectoryStreamState());
+        }
+        streams.keySet().retainAll(currentRecipients);
+
+        Vec3d endPosition = this.getPos();
+        Vec3d finalVelocity = this.getVelocity();
+        boolean meaningfulMotion = builder.hasMeaningfulMotion(endPosition, finalVelocity);
+        boolean hasTransmission = false;
+        for (TrajectoryStreamState stream : streams.values()) {
+            if (stream.shouldSend(meaningfulMotion)) {
+                hasTransmission = true;
+                break;
+            }
+        }
+        if (!hasTransmission) {
+            return;
+        }
+
+        // MinecartTrajectory falls back to finalVelocity before consulting orientationHint. Avoid
+        // the two rail probes, and omit the optional wire field, whenever velocity can supply it.
+        Vec3d orientationHint = finalVelocity.lengthSquared()
+                        <= minecartspeedfeatures$ORIENTATION_EPSILON_SQUARED
+                ? this.minecartspeedfeatures$getOrientationHint()
+                : Vec3d.ZERO;
+        MinecartTrajectory trajectory = builder.finish(
+                endPosition,
+                finalVelocity,
+                orientationHint
         );
+        AbstractMinecartEntity minecart = (AbstractMinecartEntity)(Object)this;
+        for (ServerPlayerEntity player : recipients) {
+            TrajectoryStreamPhase phase = streams.get(player.getUuid()).advance(meaningfulMotion);
+            if (phase != null) {
+                MinecartTrajectoryNetworking.send(player, minecart, trajectory, phase);
+            }
+        }
     }
 
     @Redirect(

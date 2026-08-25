@@ -31,7 +31,7 @@ public final class ClientTrajectoryManager {
             return;
         }
         this.playbacks.computeIfAbsent(payload.entityId(), ignored -> new TrajectoryPlayback())
-                .accept(payload.trajectory());
+                .accept(payload.trajectory(), payload.phase());
     }
 
     /** Selects the trajectory that the upcoming entity tick and render interval will share. */
