@@ -25,10 +25,10 @@ class MinecartTrajectoryPayloadTest {
                         123456L,
                         List.of(
                                 new TrajectoryPoint(0.0, new Vec3d(1.0, 2.0, 3.0)),
-                                new TrajectoryPoint(0.2, new Vec3d(2.0, 2.5, 3.0)),
-                                new TrajectoryPoint(1.0, new Vec3d(5.0, 4.0, 3.0))
+                                new TrajectoryPoint(0.2, new Vec3d(2.123456, 2.5, 3.0)),
+                                new TrajectoryPoint(1.0, new Vec3d(5.123456, 4.234567, 3.345678))
                         ),
-                        new Vec3d(1.25, 0.5, -0.25),
+                        new Vec3d(1.234567, 0.54321, -0.234567),
                         new Vec3d(0.0, 0.0, 0.6)
                 ),
                 TrajectoryStreamPhase.START
@@ -49,21 +49,26 @@ class MinecartTrajectoryPayloadTest {
             for (int index = 0; index < expected.trajectory().points().size(); index++) {
                 TrajectoryPoint expectedPoint = expected.trajectory().points().get(index);
                 TrajectoryPoint actualPoint = actual.trajectory().points().get(index);
-                double tolerance = index == 0
+                double timeTolerance = index == 0
                                 || index == expected.trajectory().points().size() - 1
                         ? TOLERANCE
                         : FLOAT_TOLERANCE;
+                double positionTolerance = index == 0 ? TOLERANCE : FLOAT_TOLERANCE;
                 assertEquals(
                         expectedPoint.timeFraction(),
                         actualPoint.timeFraction(),
-                        tolerance
+                        timeTolerance
                 );
-                assertVec3d(expectedPoint.position(), actualPoint.position(), tolerance);
+                assertVec3d(
+                        expectedPoint.position(),
+                        actualPoint.position(),
+                        positionTolerance
+                );
             }
             assertVec3d(
                     expected.trajectory().finalVelocity(),
                     actual.trajectory().finalVelocity(),
-                    TOLERANCE
+                    FLOAT_TOLERANCE
             );
             assertVec3d(
                     expected.trajectory().orientationHint(),
@@ -76,7 +81,40 @@ class MinecartTrajectoryPayloadTest {
     }
 
     @Test
-    void twoPointTrajectoryWithoutOrientationUsesSeventySixBytes() {
+    void relativeEndpointPreservesLargeWorldCoordinatePrecision() {
+        Vec3d start = new Vec3d(29_999_999.123456, 200.987654, -29_999_999.234567);
+        Vec3d end = start.add(0.123456, -0.234567, 0.345678);
+        MinecartTrajectoryPayload payload = new MinecartTrajectoryPayload(
+                73,
+                new MinecartTrajectory(
+                        123456L,
+                        List.of(
+                                new TrajectoryPoint(0.0, start),
+                                new TrajectoryPoint(1.0, end)
+                        ),
+                        new Vec3d(0.123456, -0.234567, 0.345678),
+                        Vec3d.ZERO
+                ),
+                TrajectoryStreamPhase.CONTINUE
+        );
+        RegistryByteBuf buffer = new RegistryByteBuf(
+                Unpooled.buffer(),
+                DynamicRegistryManager.EMPTY
+        );
+
+        try {
+            MinecartTrajectoryPayload.CODEC.encode(buffer, payload);
+            MinecartTrajectoryPayload actual = MinecartTrajectoryPayload.CODEC.decode(buffer);
+
+            assertVec3d(start, actual.trajectory().points().getFirst().position(), TOLERANCE);
+            assertVec3d(end, actual.trajectory().points().getLast().position(), FLOAT_TOLERANCE);
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @Test
+    void twoPointTrajectoryWithoutOrientationUsesFiftyTwoBytes() {
         MinecartTrajectoryPayload payload = new MinecartTrajectoryPayload(
                 1,
                 new MinecartTrajectory(
@@ -98,7 +136,7 @@ class MinecartTrajectoryPayloadTest {
         try {
             MinecartTrajectoryPayload.CODEC.encode(buffer, payload);
 
-            assertEquals(76, buffer.readableBytes());
+            assertEquals(52, buffer.readableBytes());
         } finally {
             buffer.release();
         }
