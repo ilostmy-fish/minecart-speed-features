@@ -8,7 +8,8 @@
     "GameRulesIntRuleInvoker",
     "MinecartRailTraversalMixin",
     "MinecartSpeedMixin",
-    "MinecartLaunchMixin"
+    "MinecartLaunchMixin",
+    "MinecartCollisionMixin"
   ],
   "injectors": {
     "defaultRequire": 1
