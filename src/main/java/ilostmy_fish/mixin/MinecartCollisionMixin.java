@@ -52,11 +52,15 @@ public abstract class MinecartCollisionMixin extends Entity {
     private static final double minecartspeedfeatures$MIN_DIRECTION_LENGTH_SQUARED = 1.0E-12;
     @Unique
     private static final long minecartspeedfeatures$PASS_THROUGH_GRACE_TICKS = 1L;
+    @Unique
+    private static final long minecartspeedfeatures$CONTACT_SEPARATION_HYSTERESIS_TICKS = 1L;
 
     @Unique
     private Vec3d minecartspeedfeatures$velocityBeforeRailMove = Vec3d.ZERO;
     @Unique
     private Map<UUID, Long> minecartspeedfeatures$passThroughEntities;
+    @Unique
+    private Map<UUID, Long> minecartspeedfeatures$impactLastContactTicks;
 
     protected MinecartCollisionMixin(EntityType<?> type, World world) {
         super(type, world);
@@ -110,6 +114,16 @@ public abstract class MinecartCollisionMixin extends Entity {
         if (target == null) {
             return;
         }
+        if (this.minecartspeedfeatures$isImpactDisarmed(target)) {
+            // A repeated clipped movement is suppressed while the pair is still disarmed, but it
+            // does not extend the latch. Only actual bounding-box overlap refreshes contact state.
+            return;
+        }
+
+        // The impact itself counts as contact even when Entity.move clipped the minecart before
+        // the two bounding boxes actually overlapped. Further impacts against this same entity are
+        // suppressed until the pair has remained physically separated for one full tick.
+        this.minecartspeedfeatures$markImpactContact(target);
 
         ImpactPhysics.ImpactResult impact = ImpactPhysics.impact(
                 speedBlocksPerSecond,
@@ -181,6 +195,38 @@ public abstract class MinecartCollisionMixin extends Entity {
 
         long currentTick = this.getWorld().getTime();
         passThrough.entrySet().removeIf(entry -> currentTick > entry.getValue());
+    }
+
+    /**
+     * Rearms impact damage only after a previously struck entity has remained non-overlapping for
+     * longer than one tick. Checking at tick tail keeps a pair disarmed throughout the whole tick
+     * in which a brief post-knockback gap may close again into a sustained push.
+     */
+    @Inject(method = "tick()V", at = @At("TAIL"))
+    private void minecartspeedfeatures$updateImpactContactLatches(CallbackInfo ci) {
+        if (this.getWorld().isClient) {
+            return;
+        }
+
+        Map<UUID, Long> contacts = this.minecartspeedfeatures$impactLastContactTicks;
+        if (contacts == null || contacts.isEmpty()) {
+            return;
+        }
+
+        long currentTick = this.getWorld().getTime();
+        List<Entity> overlappingContacts = this.getWorld().getOtherEntities(
+                this,
+                this.getBoundingBox(),
+                entity -> contacts.containsKey(entity.getUuid())
+        );
+        for (Entity overlapping : overlappingContacts) {
+            contacts.put(overlapping.getUuid(), currentTick);
+        }
+
+        contacts.entrySet().removeIf(entry ->
+                currentTick - entry.getValue()
+                        > minecartspeedfeatures$CONTACT_SEPARATION_HYSTERESIS_TICKS
+        );
     }
 
     /**
@@ -300,5 +346,22 @@ public abstract class MinecartCollisionMixin extends Entity {
 
         Long graceThroughTick = passThrough.get(entity.getUuid());
         return graceThroughTick != null && this.getWorld().getTime() <= graceThroughTick;
+    }
+
+    @Unique
+    private void minecartspeedfeatures$markImpactContact(Entity entity) {
+        if (this.minecartspeedfeatures$impactLastContactTicks == null) {
+            this.minecartspeedfeatures$impactLastContactTicks = new HashMap<>();
+        }
+        this.minecartspeedfeatures$impactLastContactTicks.put(
+                entity.getUuid(),
+                this.getWorld().getTime()
+        );
+    }
+
+    @Unique
+    private boolean minecartspeedfeatures$isImpactDisarmed(Entity entity) {
+        Map<UUID, Long> contacts = this.minecartspeedfeatures$impactLastContactTicks;
+        return contacts != null && contacts.containsKey(entity.getUuid());
     }
 }
