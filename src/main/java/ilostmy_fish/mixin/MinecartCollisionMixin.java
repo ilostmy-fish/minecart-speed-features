@@ -1,6 +1,7 @@
 package ilostmy_fish.mixin;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import ilostmy_fish.MinecartSpeedFeatures;
 import ilostmy_fish.physics.ImpactPhysics;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
@@ -125,7 +126,11 @@ public abstract class MinecartCollisionMixin extends Entity {
         // TODO: Replace generic damage with an MSF minecart-impact damage type. Desired semantics:
         // armor respected, shields ignored, Resistance respected, Protection respected, and no
         // hurt cooldown. Keep this separate from the cart's max-health penetration cost.
-        target.damage(this.getDamageSources().generic(), (float) impact.damagePotential());
+        int damagePercent = MinecartSpeedFeatures.MINECART_DAMAGE_PERCENT == null
+                ? 100
+                : this.getWorld().getGameRules().getInt(MinecartSpeedFeatures.MINECART_DAMAGE_PERCENT);
+        double scaledDamage = impact.damagePotential() * damagePercent / 100.0;
+        target.damage(this.getDamageSources().generic(), (float) scaledDamage);
 
         double speedScale = impact.speedScale();
         Vec3d postCollisionVelocity = this.getVelocity();

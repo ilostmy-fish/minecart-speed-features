@@ -21,7 +21,7 @@ public abstract class GameRulesMixin {
     }
 
     @Inject(method = "<clinit>", at = @At("TAIL"))
-    private static void minecartspeedfeatures$registerMinecartMaxSpeed(CallbackInfo ci) {
+    private static void minecartspeedfeatures$registerMinecartRules(CallbackInfo ci) {
         if (MinecartSpeedFeatures.MINECART_MAX_SPEED == null) {
             GameRules.Type<GameRules.IntRule> type = GameRulesIntRuleInvoker.minecartspeedfeatures$create(
                     8,
@@ -31,6 +31,20 @@ public abstract class GameRulesMixin {
             );
             MinecartSpeedFeatures.MINECART_MAX_SPEED = register(
                     "minecartMaxSpeed",
+                    GameRules.Category.MISC,
+                    type
+            );
+        }
+
+        if (MinecartSpeedFeatures.MINECART_DAMAGE_PERCENT == null) {
+            GameRules.Type<GameRules.IntRule> type = GameRulesIntRuleInvoker.minecartspeedfeatures$create(
+                    100,
+                    1,
+                    200,
+                    NoOpRuleCallback.INSTANCE
+            );
+            MinecartSpeedFeatures.MINECART_DAMAGE_PERCENT = register(
+                    "minecartDamagePercent",
                     GameRules.Category.MISC,
                     type
             );
