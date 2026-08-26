@@ -119,9 +119,9 @@ public abstract class MinecartCollisionMixin extends Entity {
         // Match Cammie's velocity-based knockback: horizontal knockback uses 90% of the cart's
         // incoming velocity and vertical knockback uses 20% of its total incoming speed.
         target.addVelocity(
-                incomingVelocity.getX() * 0.9,
+                incomingVelocity.getX() * 0.8,
                 incomingVelocity.length() * 0.2,
-                incomingVelocity.getZ() * 0.9
+                incomingVelocity.getZ() * 0.8
         );
 
         int damagePercent = MinecartSpeedFeatures.MINECART_DAMAGE_PERCENT == null
