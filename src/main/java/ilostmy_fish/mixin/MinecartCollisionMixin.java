@@ -1,11 +1,11 @@
 package ilostmy_fish.mixin;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import ilostmy_fish.physics.ImpactPhysics;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.vehicle.AbstractMinecartEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -35,16 +35,26 @@ import java.util.UUID;
 @Mixin(AbstractMinecartEntity.class)
 public abstract class MinecartCollisionMixin extends Entity {
     @Unique
+    private static final double minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_BPS =
+            ImpactPhysics.DAMAGE_SPEED_OFFSET_BPS;
+    @Unique
+    private static final double minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_PER_TICK =
+            minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_BPS / ImpactPhysics.TICKS_PER_SECOND;
+    @Unique
+    private static final double minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_SQUARED =
+            minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_PER_TICK
+                    * minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_PER_TICK;
+    @Unique
     private static final double minecartspeedfeatures$IMPACT_SEARCH_EXPANSION = 0.1;
     @Unique
     private static final double minecartspeedfeatures$MIN_DIRECTION_LENGTH_SQUARED = 1.0E-12;
     @Unique
-    private static final int minecartspeedfeatures$PASS_THROUGH_TICKS = 4;
+    private static final long minecartspeedfeatures$PASS_THROUGH_GRACE_TICKS = 1L;
 
     @Unique
     private Vec3d minecartspeedfeatures$velocityBeforeRailMove = Vec3d.ZERO;
     @Unique
-    private Map<UUID, Integer> minecartspeedfeatures$passThroughEntities;
+    private Map<UUID, Long> minecartspeedfeatures$passThroughEntities;
 
     protected MinecartCollisionMixin(EntityType<?> type, World world) {
         super(type, world);
@@ -85,6 +95,10 @@ public abstract class MinecartCollisionMixin extends Entity {
         Vec3d incomingVelocity = this.minecartspeedfeatures$velocityBeforeRailMove;
         double speedBlocksPerSecond = incomingVelocity.horizontalLength()
                 * ImpactPhysics.TICKS_PER_SECOND;
+        if (speedBlocksPerSecond <= minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_BPS) {
+            return;
+        }
+
         double damagePotential = ImpactPhysics.damagePotentialForSpeed(speedBlocksPerSecond);
         if (damagePotential <= 0.0) {
             return;
@@ -107,7 +121,11 @@ public abstract class MinecartCollisionMixin extends Entity {
                 incomingVelocity.length() * 0.2,
                 incomingVelocity.getZ() * 0.9
         );
-        target.damage(this.getDamageSources().generic(), (float)impact.damagePotential());
+
+        // TODO: Replace generic damage with an MSF minecart-impact damage type. Desired semantics:
+        // armor respected, shields ignored, Resistance respected, Protection respected, and no
+        // hurt cooldown. Keep this separate from the cart's max-health penetration cost.
+        target.damage(this.getDamageSources().generic(), (float) impact.damagePotential());
 
         double speedScale = impact.speedScale();
         Vec3d postCollisionVelocity = this.getVelocity();
@@ -122,15 +140,35 @@ public abstract class MinecartCollisionMixin extends Entity {
         }
     }
 
+    /**
+     * Vanilla only runs rideable-minecart mob pickup above 2 blocks/second. MSF inverts that gate:
+     * slow carts may pick mobs up, while faster carts use impact handling instead.
+     */
+    @ModifyExpressionValue(
+            method = "tick()V",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/util/math/Vec3d;horizontalLengthSquared()D"
+            )
+    )
+    private double minecartspeedfeatures$limitAutomaticMobPickupToSlowCarts(double horizontalSpeedSquared) {
+        // The vanilla comparison immediately after this call is `> 0.01`. Return a value on the
+        // corresponding side of that comparison instead of replacing tick() or duplicating its
+        // entity-interaction loop, keeping the modification narrowly scoped to the pickup gate.
+        return horizontalSpeedSquared <= minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_SQUARED
+                ? 1.0
+                : 0.0;
+    }
+
     @Inject(method = "tick()V", at = @At("HEAD"))
-    private void minecartspeedfeatures$agePassThroughEntities(CallbackInfo ci) {
-        Map<UUID, Integer> passThrough = this.minecartspeedfeatures$passThroughEntities;
+    private void minecartspeedfeatures$expirePassThroughEntities(CallbackInfo ci) {
+        Map<UUID, Long> passThrough = this.minecartspeedfeatures$passThroughEntities;
         if (passThrough == null || passThrough.isEmpty()) {
             return;
         }
 
-        passThrough.replaceAll((uuid, ticks) -> ticks - 1);
-        passThrough.entrySet().removeIf(entry -> entry.getValue() <= 0);
+        long currentTick = this.getWorld().getTime();
+        passThrough.entrySet().removeIf(entry -> currentTick > entry.getValue());
     }
 
     /**
@@ -152,7 +190,9 @@ public abstract class MinecartCollisionMixin extends Entity {
         }
     }
 
-    /** Prevent an entity that was just struck from being immediately auto-mounted by a rideable cart. */
+    /**
+     * Prevent an entity that was just struck from being immediately auto-mounted by a rideable cart.
+     */
     @Redirect(
             method = "tick()V",
             at = @At(
@@ -167,7 +207,9 @@ public abstract class MinecartCollisionMixin extends Entity {
         return entity.startRiding(vehicle);
     }
 
-    /** Preserve the impact knockback instead of immediately applying vanilla minecart pushing. */
+    /**
+     * Preserve the impact knockback instead of immediately applying vanilla minecart pushing.
+     */
     @Redirect(
             method = "tick()V",
             at = @At(
@@ -187,7 +229,6 @@ public abstract class MinecartCollisionMixin extends Entity {
                 this,
                 this.getBoundingBox().expand(minecartspeedfeatures$IMPACT_SEARCH_EXPANSION),
                 entity -> entity instanceof LivingEntity living
-                        && !(living instanceof PlayerEntity)
                         && living.isAlive()
                         && !living.hasVehicle()
                         && !this.minecartspeedfeatures$isPassingThrough(living)
@@ -208,7 +249,7 @@ public abstract class MinecartCollisionMixin extends Entity {
                 > minecartspeedfeatures$MIN_DIRECTION_LENGTH_SQUARED;
 
         for (Entity candidate : candidates) {
-            LivingEntity living = (LivingEntity)candidate;
+            LivingEntity living = (LivingEntity) candidate;
             if (hasDirection) {
                 Vec3d offset = living.getPos().subtract(this.getPos());
                 if (offset.dotProduct(horizontalDirection) < -0.05) {
@@ -230,15 +271,22 @@ public abstract class MinecartCollisionMixin extends Entity {
         if (this.minecartspeedfeatures$passThroughEntities == null) {
             this.minecartspeedfeatures$passThroughEntities = new HashMap<>();
         }
+        long graceThroughTick = this.getWorld().getTime()
+                + minecartspeedfeatures$PASS_THROUGH_GRACE_TICKS;
         this.minecartspeedfeatures$passThroughEntities.put(
                 entity.getUuid(),
-                minecartspeedfeatures$PASS_THROUGH_TICKS
+                graceThroughTick
         );
     }
 
     @Unique
     private boolean minecartspeedfeatures$isPassingThrough(Entity entity) {
-        Map<UUID, Integer> passThrough = this.minecartspeedfeatures$passThroughEntities;
-        return passThrough != null && passThrough.containsKey(entity.getUuid());
+        Map<UUID, Long> passThrough = this.minecartspeedfeatures$passThroughEntities;
+        if (passThrough == null) {
+            return false;
+        }
+
+        Long graceThroughTick = passThrough.get(entity.getUuid());
+        return graceThroughTick != null && this.getWorld().getTime() <= graceThroughTick;
     }
 }
