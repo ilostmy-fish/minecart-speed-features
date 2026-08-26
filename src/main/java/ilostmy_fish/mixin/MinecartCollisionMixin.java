@@ -2,6 +2,8 @@ package ilostmy_fish.mixin;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import ilostmy_fish.MinecartSpeedFeatures;
+import ilostmy_fish.collision.ImpactContactTracker;
+import ilostmy_fish.collision.ImpactKinematics;
 import ilostmy_fish.damage.MinecartImpactDamageSource;
 import ilostmy_fish.physics.ImpactPhysics;
 import net.minecraft.block.BlockState;
@@ -10,6 +12,7 @@ import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.vehicle.AbstractMinecartEntity;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
@@ -18,11 +21,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -47,23 +49,37 @@ public abstract class MinecartCollisionMixin extends Entity {
             minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_PER_TICK
                     * minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_PER_TICK;
     @Unique
-    private static final double minecartspeedfeatures$IMPACT_SEARCH_EXPANSION = 0.1;
+    private static final double minecartspeedfeatures$IMPACT_CONTACT_EPSILON = 1.0E-6;
     @Unique
     private static final double minecartspeedfeatures$MIN_DIRECTION_LENGTH_SQUARED = 1.0E-12;
-    @Unique
-    private static final long minecartspeedfeatures$PASS_THROUGH_GRACE_TICKS = 1L;
     @Unique
     private static final long minecartspeedfeatures$CONTACT_SEPARATION_HYSTERESIS_TICKS = 1L;
 
     @Unique
     private Vec3d minecartspeedfeatures$velocityBeforeRailMove = Vec3d.ZERO;
     @Unique
-    private Map<UUID, Long> minecartspeedfeatures$passThroughEntities;
+    private Vec3d minecartspeedfeatures$positionBeforeRailMove = Vec3d.ZERO;
     @Unique
-    private Map<UUID, Long> minecartspeedfeatures$impactLastContactTicks;
+    private ImpactContactTracker minecartspeedfeatures$impactContacts;
+    @Unique
+    private Set<UUID> minecartspeedfeatures$impactedThisTick;
 
     protected MinecartCollisionMixin(EntityType<?> type, World world) {
         super(type, world);
+    }
+
+    /**
+     * Give minecarts the symmetric entity-collision contract used by boats.
+     *
+     * <p>Vanilla minecarts already use {@code BoatEntity.canCollide} when the minecart is the
+     * moving entity, but unlike boats they inherit {@link Entity#isCollidable()} as {@code false}.
+     * That makes the result depend on which entity happens to move: a cart moving into a mob sees
+     * the mob, while a mob moving into the same cart can pass through it. Introducing this override
+     * makes other entities include the minecart in their movement collision shapes as well.</p>
+     */
+    @Override
+    public boolean isCollidable() {
+        return true;
     }
 
     @Inject(
@@ -79,6 +95,7 @@ public abstract class MinecartCollisionMixin extends Entity {
             CallbackInfo ci
     ) {
         this.minecartspeedfeatures$velocityBeforeRailMove = this.getVelocity();
+        this.minecartspeedfeatures$positionBeforeRailMove = this.getPos();
     }
 
     @Inject(
@@ -99,6 +116,13 @@ public abstract class MinecartCollisionMixin extends Entity {
         }
 
         Vec3d incomingVelocity = this.minecartspeedfeatures$velocityBeforeRailMove;
+        Vec3d actualMovement = this.getPos().subtract(
+                this.minecartspeedfeatures$positionBeforeRailMove
+        );
+        if (!ImpactKinematics.isDamagingApproach(incomingVelocity, actualMovement)) {
+            return;
+        }
+
         double speedBlocksPerSecond = incomingVelocity.horizontalLength()
                 * ImpactPhysics.TICKS_PER_SECOND;
         if (speedBlocksPerSecond <= minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_BPS) {
@@ -115,14 +139,13 @@ public abstract class MinecartCollisionMixin extends Entity {
             return;
         }
         if (this.minecartspeedfeatures$isImpactDisarmed(target)) {
-            // A repeated clipped movement is suppressed while the pair is still disarmed, but it
-            // does not extend the latch. Only actual bounding-box overlap refreshes contact state.
+            // Collision clipping may invoke impact handling again without a real box overlap.
+            // Suppress the repeated impact, but do not refresh the contact timestamp here.
             return;
         }
 
-        // The impact itself counts as contact even when Entity.move clipped the minecart before
-        // the two bounding boxes actually overlapped. Further impacts against this same entity are
-        // suppressed until the pair has remained physically separated for one full tick.
+        // Entity.move leaves colliding boxes on the shared contact plane rather than overlapping.
+        // The initial MSF impact itself starts the damage-disarm hysteresis.
         this.minecartspeedfeatures$markImpactContact(target);
 
         ImpactPhysics.ImpactResult impact = ImpactPhysics.impact(
@@ -130,7 +153,7 @@ public abstract class MinecartCollisionMixin extends Entity {
                 target.getMaxHealth()
         );
 
-        // Match Cammie's velocity-based knockback: horizontal knockback uses 90% of the cart's
+        // Match Cammie's velocity-based knockback: horizontal knockback uses 80% of the cart's
         // incoming velocity and vertical knockback uses 20% of its total incoming speed.
         target.addVelocity(
                 incomingVelocity.getX() * 0.8,
@@ -160,15 +183,11 @@ public abstract class MinecartCollisionMixin extends Entity {
                 postCollisionVelocity.getY(),
                 incomingVelocity.getZ() * speedScale
         );
-
-        if (impact.residualSpeedBlocksPerSecond() > 0.0) {
-            this.minecartspeedfeatures$markPassThrough(target);
-        }
     }
 
     /**
-     * Vanilla only runs rideable-minecart mob pickup above 2 blocks/second. MSF inverts that gate:
-     * slow carts may pick mobs up, while faster carts use impact handling instead.
+     * Always run the rideable minecart's nearby-mob loop. Slow empty carts retain vanilla mounting;
+     * fast or recently impacted contacts are converted to pushing by the redirect below.
      */
     @ModifyExpressionValue(
             method = "tick()V",
@@ -177,38 +196,37 @@ public abstract class MinecartCollisionMixin extends Entity {
                     target = "Lnet/minecraft/util/math/Vec3d;horizontalLengthSquared()D"
             )
     )
-    private double minecartspeedfeatures$limitAutomaticMobPickupToSlowCarts(double horizontalSpeedSquared) {
-        // The vanilla comparison immediately after this call is `> 0.01`. Return a value on the
-        // corresponding side of that comparison instead of replacing tick() or duplicating its
-        // entity-interaction loop, keeping the modification narrowly scoped to the pickup gate.
-        return horizontalSpeedSquared <= minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_SQUARED
-                ? 1.0
-                : 0.0;
+    private double minecartspeedfeatures$alwaysRunRideableMobInteractions(double horizontalSpeedSquared) {
+        // The vanilla comparison immediately after this call is `> 0.01`.
+        return 1.0;
     }
 
     @Inject(method = "tick()V", at = @At("HEAD"))
-    private void minecartspeedfeatures$expirePassThroughEntities(CallbackInfo ci) {
-        Map<UUID, Long> passThrough = this.minecartspeedfeatures$passThroughEntities;
-        if (passThrough == null || passThrough.isEmpty()) {
-            return;
+    private void minecartspeedfeatures$beginImpactContactTick(CallbackInfo ci) {
+        if (this.minecartspeedfeatures$impactedThisTick != null) {
+            this.minecartspeedfeatures$impactedThisTick.clear();
         }
+        this.minecartspeedfeatures$refreshOverlappingImpactContacts();
+    }
 
-        long currentTick = this.getWorld().getTime();
-        passThrough.entrySet().removeIf(entry -> currentTick > entry.getValue());
+    @Inject(method = "tick()V", at = @At("TAIL"))
+    private void minecartspeedfeatures$finishImpactContactTick(CallbackInfo ci) {
+        this.minecartspeedfeatures$refreshOverlappingImpactContacts();
     }
 
     /**
-     * Rearms impact damage only after a previously struck entity has remained non-overlapping for
-     * longer than one tick. Checking at tick tail keeps a pair disarmed throughout the whole tick
-     * in which a brief post-knockback gap may close again into a sustained push.
+     * Refreshes a latch only for strict, positive-volume hitbox intersection.
+     *
+     * <p>A face-to-face clipped collision does not satisfy {@link net.minecraft.util.math.Box#intersects}
+     * and therefore cannot keep extending the one-tick hysteresis.</p>
      */
-    @Inject(method = "tick()V", at = @At("TAIL"))
-    private void minecartspeedfeatures$updateImpactContactLatches(CallbackInfo ci) {
+    @Unique
+    private void minecartspeedfeatures$refreshOverlappingImpactContacts() {
         if (this.getWorld().isClient) {
             return;
         }
 
-        Map<UUID, Long> contacts = this.minecartspeedfeatures$impactLastContactTicks;
+        ImpactContactTracker contacts = this.minecartspeedfeatures$impactContacts;
         if (contacts == null || contacts.isEmpty()) {
             return;
         }
@@ -217,39 +235,18 @@ public abstract class MinecartCollisionMixin extends Entity {
         List<Entity> overlappingContacts = this.getWorld().getOtherEntities(
                 this,
                 this.getBoundingBox(),
-                entity -> contacts.containsKey(entity.getUuid())
+                entity -> contacts.isTracked(entity.getUuid())
+                        && this.getBoundingBox().intersects(entity.getBoundingBox())
         );
         for (Entity overlapping : overlappingContacts) {
-            contacts.put(overlapping.getUuid(), currentTick);
+            contacts.recordContact(overlapping.getUuid(), currentTick);
         }
-
-        contacts.entrySet().removeIf(entry ->
-                currentTick - entry.getValue()
-                        > minecartspeedfeatures$CONTACT_SEPARATION_HYSTERESIS_TICKS
-        );
+        contacts.expireSeparatedContacts(currentTick);
     }
 
     /**
-     * Entity collision shapes are selected through the moving minecart's collidesWith predicate.
-     * A successfully penetrated mob is ignored briefly so the next tick can carry the cart beyond
-     * the exact contact plane instead of immediately colliding with the same box again.
-     */
-    @Inject(
-            method = "collidesWith(Lnet/minecraft/entity/Entity;)Z",
-            at = @At("HEAD"),
-            cancellable = true
-    )
-    private void minecartspeedfeatures$ignoreRecentlyImpactedEntity(
-            Entity other,
-            CallbackInfoReturnable<Boolean> cir
-    ) {
-        if (this.minecartspeedfeatures$isPassingThrough(other)) {
-            cir.setReturnValue(false);
-        }
-    }
-
-    /**
-     * Prevent an entity that was just struck from being immediately auto-mounted by a rideable cart.
+     * Fast contacts push instead of mounting. A recent impact does the same on later ticks, while
+     * the impact tick itself preserves MSF's deliberate knockback without stacking vanilla push.
      */
     @Redirect(
             method = "tick()V",
@@ -258,8 +255,14 @@ public abstract class MinecartCollisionMixin extends Entity {
                     target = "Lnet/minecraft/entity/Entity;startRiding(Lnet/minecraft/entity/Entity;)Z"
             )
     )
-    private boolean minecartspeedfeatures$skipAutoMountAfterImpact(Entity entity, Entity vehicle) {
-        if (this.minecartspeedfeatures$isPassingThrough(entity)) {
+    private boolean minecartspeedfeatures$pushInsteadOfMountAfterImpact(Entity entity, Entity vehicle) {
+        if (this.minecartspeedfeatures$wasImpactedThisTick(entity)) {
+            return false;
+        }
+        if (this.minecartspeedfeatures$isImpactDisarmed(entity)
+                || this.getVelocity().horizontalLengthSquared()
+                        > minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_SQUARED) {
+            entity.pushAwayFrom(vehicle);
             return false;
         }
         return entity.startRiding(vehicle);
@@ -276,20 +279,21 @@ public abstract class MinecartCollisionMixin extends Entity {
             )
     )
     private void minecartspeedfeatures$skipVanillaPushAfterImpact(Entity entity, Entity minecart) {
-        if (!this.minecartspeedfeatures$isPassingThrough(entity)) {
-            entity.pushAwayFrom(minecart);
+        if (this.minecartspeedfeatures$wasImpactedThisTick(entity)) {
+            return;
         }
+        entity.pushAwayFrom(minecart);
     }
 
     @Unique
     private LivingEntity minecartspeedfeatures$findImpactTarget(Vec3d incomingVelocity) {
         List<Entity> candidates = this.getWorld().getOtherEntities(
                 this,
-                this.getBoundingBox().expand(minecartspeedfeatures$IMPACT_SEARCH_EXPANSION),
+                this.getBoundingBox().expand(minecartspeedfeatures$IMPACT_CONTACT_EPSILON),
                 entity -> entity instanceof LivingEntity living
                         && living.isAlive()
                         && !living.hasVehicle()
-                        && !this.minecartspeedfeatures$isPassingThrough(living)
+                        && this.minecartspeedfeatures$isAtHorizontalContact(living)
                         && this.collidesWith(living)
         );
         if (candidates.isEmpty()) {
@@ -325,43 +329,53 @@ public abstract class MinecartCollisionMixin extends Entity {
     }
 
     @Unique
-    private void minecartspeedfeatures$markPassThrough(Entity entity) {
-        if (this.minecartspeedfeatures$passThroughEntities == null) {
-            this.minecartspeedfeatures$passThroughEntities = new HashMap<>();
-        }
-        long graceThroughTick = this.getWorld().getTime()
-                + minecartspeedfeatures$PASS_THROUGH_GRACE_TICKS;
-        this.minecartspeedfeatures$passThroughEntities.put(
-                entity.getUuid(),
-                graceThroughTick
-        );
-    }
-
-    @Unique
-    private boolean minecartspeedfeatures$isPassingThrough(Entity entity) {
-        Map<UUID, Long> passThrough = this.minecartspeedfeatures$passThroughEntities;
-        if (passThrough == null) {
-            return false;
-        }
-
-        Long graceThroughTick = passThrough.get(entity.getUuid());
-        return graceThroughTick != null && this.getWorld().getTime() <= graceThroughTick;
+    private boolean minecartspeedfeatures$isAtHorizontalContact(Entity entity) {
+        Box cartBox = this.getBoundingBox();
+        Box entityBox = entity.getBoundingBox();
+        return cartBox.minY < entityBox.maxY
+                && cartBox.maxY > entityBox.minY
+                && cartBox.minX - minecartspeedfeatures$IMPACT_CONTACT_EPSILON < entityBox.maxX
+                && cartBox.maxX + minecartspeedfeatures$IMPACT_CONTACT_EPSILON > entityBox.minX
+                && cartBox.minZ - minecartspeedfeatures$IMPACT_CONTACT_EPSILON < entityBox.maxZ
+                && cartBox.maxZ + minecartspeedfeatures$IMPACT_CONTACT_EPSILON > entityBox.minZ;
     }
 
     @Unique
     private void minecartspeedfeatures$markImpactContact(Entity entity) {
-        if (this.minecartspeedfeatures$impactLastContactTicks == null) {
-            this.minecartspeedfeatures$impactLastContactTicks = new HashMap<>();
+        if (this.minecartspeedfeatures$impactContacts == null) {
+            this.minecartspeedfeatures$impactContacts = new ImpactContactTracker(
+                    minecartspeedfeatures$CONTACT_SEPARATION_HYSTERESIS_TICKS
+            );
         }
-        this.minecartspeedfeatures$impactLastContactTicks.put(
+        this.minecartspeedfeatures$impactContacts.recordContact(
                 entity.getUuid(),
                 this.getWorld().getTime()
         );
+        if (this.minecartspeedfeatures$impactedThisTick == null) {
+            this.minecartspeedfeatures$impactedThisTick = new HashSet<>();
+        }
+        this.minecartspeedfeatures$impactedThisTick.add(entity.getUuid());
     }
 
     @Unique
     private boolean minecartspeedfeatures$isImpactDisarmed(Entity entity) {
-        Map<UUID, Long> contacts = this.minecartspeedfeatures$impactLastContactTicks;
-        return contacts != null && contacts.containsKey(entity.getUuid());
+        ImpactContactTracker contacts = this.minecartspeedfeatures$impactContacts;
+        if (contacts == null) {
+            return false;
+        }
+
+        UUID entityId = entity.getUuid();
+        long currentTick = this.getWorld().getTime();
+        if (contacts.isTracked(entityId)
+                && this.getBoundingBox().intersects(entity.getBoundingBox())) {
+            contacts.recordContact(entityId, currentTick);
+        }
+        return contacts.isDisarmed(entityId, currentTick);
+    }
+
+    @Unique
+    private boolean minecartspeedfeatures$wasImpactedThisTick(Entity entity) {
+        Set<UUID> impacted = this.minecartspeedfeatures$impactedThisTick;
+        return impacted != null && impacted.contains(entity.getUuid());
     }
 }
