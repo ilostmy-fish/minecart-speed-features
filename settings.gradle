@@ -9,5 +9,5 @@ pluginManagement {
 	}
 }
 
-// Should match your modid
+// Ideally matches your modid
 rootProject.name = 'minecart-speed-features'

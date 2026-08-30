@@ -78,10 +78,6 @@ public abstract class MinecartLaunchMixin extends Entity implements RailTraversa
             default -> {
             }
         }
-
-        // Start airborne motion from the actual rail endpoint. The old 1.1.0 launch code moved
-        // the cart upward by 0.95 * Y velocity (+0.3 while ascending), which creates a vertical
-        // segment in the authoritative trajectory at high speeds.
         this.noClip = false;
     }
 }

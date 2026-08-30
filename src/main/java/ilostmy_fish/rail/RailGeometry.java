@@ -1,10 +1,9 @@
 package ilostmy_fish.rail;
 
 import net.minecraft.block.enums.RailShape;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
-/** Shared 1.21.1 rail-centerline geometry for traversal and visual reconstruction. */
+/** Shared 1.21.1 rail-centerline geometry for traversal and boundary ownership” would reflect its current role. */
 public final class RailGeometry {
     private static final double BOUNDARY_TOLERANCE = 1.0E-7;
     private static final double OWNERSHIP_PROBE_DISTANCE = 1.0E-4;
@@ -44,13 +43,6 @@ public final class RailGeometry {
         return firstDot < secondDot ? endpoints.second : endpoints.first;
     }
 
-    public static boolean connectsHorizontallyToward(RailRef rail, BlockPos other) {
-        int dx = other.getX() - rail.pos().getX();
-        int dz = other.getZ() - rail.pos().getZ();
-        Endpoints endpoints = endpoints(rail.shape());
-        return matchesHorizontal(endpoints.first, dx, dz) || matchesHorizontal(endpoints.second, dx, dz);
-    }
-
     /**
      * Returns whether the cart has reached the face represented by an outward rail endpoint.
      *
@@ -88,10 +80,6 @@ public final class RailGeometry {
                 0.0,
                 exit.z() / horizontal * OWNERSHIP_PROBE_DISTANCE
         );
-    }
-
-    private static boolean matchesHorizontal(RailEndpoint endpoint, int x, int z) {
-        return endpoint.x() == x && endpoint.z() == z;
     }
 
     public record Endpoints(RailEndpoint first, RailEndpoint second) {

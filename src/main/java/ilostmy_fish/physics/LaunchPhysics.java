@@ -17,7 +17,7 @@ public final class LaunchPhysics {
     }
 
     /**
-     * Keeps the previous-tick behavior once history exists, while allowing a cart that reaches
+     * Keeps the previous-tick behavior when it exists/is available, while allowing a cart that reaches
      * the end of an ascending rail on its first rail tick to use that tick's nonzero sample.
      */
     public static double selectTransitionLaunchSpeed(

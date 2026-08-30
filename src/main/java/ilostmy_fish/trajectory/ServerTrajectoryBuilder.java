@@ -6,27 +6,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Collects authoritative tick endpoints and time-aware rail-boundary samples. */
+/** Collects authoritative tick endpoints and timed intermediate movement samples. */
 public final class ServerTrajectoryBuilder {
     private static final double TIME_EPSILON = 1.0E-9;
     private static final double POSITION_TOLERANCE_SQUARED = 1.0E-10;
     private static final double VELOCITY_TOLERANCE_SQUARED = 1.0E-10;
 
     private final long serverTick;
-    private final Vec3d orientationHint;
     private final List<TrajectoryPoint> points = new ArrayList<>();
 
     public ServerTrajectoryBuilder(long serverTick, Vec3d startPosition) {
-        this(serverTick, startPosition, Vec3d.ZERO);
-    }
-
-    public ServerTrajectoryBuilder(
-            long serverTick,
-            Vec3d startPosition,
-            Vec3d orientationHint
-    ) {
         this.serverTick = serverTick;
-        this.orientationHint = Objects.requireNonNull(orientationHint);
         this.points.add(new TrajectoryPoint(0.0, Objects.requireNonNull(startPosition)));
     }
 
@@ -41,10 +31,6 @@ public final class ServerTrajectoryBuilder {
             return;
         }
         this.points.add(new TrajectoryPoint(timeFraction, Objects.requireNonNull(position)));
-    }
-
-    public MinecartTrajectory finish(Vec3d endPosition, Vec3d finalVelocity) {
-        return this.finish(endPosition, finalVelocity, this.orientationHint);
     }
 
     public MinecartTrajectory finish(

@@ -39,8 +39,8 @@ public final class ImpactPhysics {
     /**
      * Consumes the target's maximum health from the cart's impact potential.
      *
-     * <p>Maximum health deliberately acts as the generic resistance cost. Current health,
-     * armor, shields, absorption, and entity type do not affect the speed calculation.</p>
+     * <p>Maximum health deliberately acts as the generic resistance cost. Therefore, current health,
+     * armor, shields, absorption, and entity type do not affect the speed calculation here.</p>
      */
     public static ImpactResult impact(double speedBlocksPerSecond, double targetMaxHealth) {
         double speed = sanitizeNonNegative(speedBlocksPerSecond);

@@ -116,7 +116,7 @@ public abstract class MinecartCollisionMixin extends Entity {
                 target.getMaxHealth()
         );
 
-        // Match Cammie's velocity-based knockback: horizontal knockback uses 90% of the cart's
+        // Inspired by Cammie's velocity-based knockback: horizontal knockback uses 80% of the cart's
         // incoming velocity and vertical knockback uses 20% of its total incoming speed.
         target.addVelocity(
                 incomingVelocity.getX() * 0.8,

@@ -5,9 +5,6 @@ import net.minecraft.world.GameRules;
 
 import java.util.function.BiConsumer;
 
-/**
- * A dependency-free gamerule callback.
- */
 public final class NoOpRuleCallback implements BiConsumer<MinecraftServer, GameRules.IntRule> {
     public static final NoOpRuleCallback INSTANCE = new NoOpRuleCallback();
 
@@ -16,6 +13,5 @@ public final class NoOpRuleCallback implements BiConsumer<MinecraftServer, GameR
 
     @Override
     public void accept(MinecraftServer server, GameRules.IntRule rule) {
-        // Intentionally empty. This gamerule has no side-channel state to synchronize.
     }
 }

@@ -105,7 +105,7 @@ public abstract class MinecartRailTraversalMixin extends Entity {
             return;
         }
 
-        // Orientation sampling is deliberately deferred until this tick has something to send.
+        // Skip trajectory collection when no compatible players are tracking. Orientation is computed later only if a packet will be sent and final velocity cannot supply it.
         this.minecartspeedfeatures$trajectoryBuilder = new ServerTrajectoryBuilder(
                 this.getWorld().getTime(),
                 this.getPos()
@@ -300,7 +300,6 @@ public abstract class MinecartRailTraversalMixin extends Entity {
             int z,
             boolean powered
     ) {
-        // Handled immediately after that rail's moveOnRail call in traverseRails.
     }
 
     @ModifyArg(

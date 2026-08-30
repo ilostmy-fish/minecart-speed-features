@@ -10,9 +10,6 @@ import net.minecraft.world.GameRules;
 public final class MinecartSpeedFeatures implements ModInitializer {
     public static final String MOD_ID = "minecart-speed-features";
 
-    /**
-     * Registered during GameRules.<clinit> by GameRulesMixin.
-     */
     public static GameRules.Key<GameRules.IntRule> MINECART_MAX_SPEED;
     public static GameRules.Key<GameRules.IntRule> MINECART_DAMAGE_PERCENT;
 
