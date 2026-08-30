@@ -20,7 +20,7 @@ class RailMovementBudgetTest {
         double start = x;
 
         while (budget.hasTimeRemaining()) {
-            int railX = (int)Math.floor(x);
+            int railX = (int) Math.floor(x);
             visitedRailBlocks.add(railX);
             RailMovementBudget.MovementLimit limit = budget.limit(
                     x, 0.5, railX, 0, 3.4, 0.0
@@ -75,7 +75,7 @@ class RailMovementBudgetTest {
         double[] requestedMovementByRail = {3.4, 3.264, 3.19344, 1.7828512};
         List<Integer> visitedRailBlocks = new ArrayList<>();
         for (double requestedMovement : requestedMovementByRail) {
-            int railX = (int)Math.floor(x);
+            int railX = (int) Math.floor(x);
             visitedRailBlocks.add(railX);
             RailMovementBudget.MovementLimit limit = budget.limit(
                     x, 0.5, railX, 0, requestedMovement, 0.0
@@ -109,6 +109,23 @@ class RailMovementBudgetTest {
 
         assertTrue(completion.reachedBoundary());
         assertEquals(2.0, x, TOLERANCE);
+    }
+
+    @Test
+    void zeroDistanceBoundaryHandoffCompletesWithoutConsumingTime() {
+        RailMovementBudget budget = new RailMovementBudget();
+
+        RailMovementBudget.MovementLimit limit = budget.limit(
+                1.0, 0.5, 0, 0, 2.0, 0.0
+        );
+        RailMovementBudget.MovementCompletion completion = budget.complete(limit, 0.0, 0.0);
+
+        assertEquals(0.0, limit.scale(), TOLERANCE);
+        assertTrue(limit.reachesBoundary());
+        assertTrue(completion.reachedBoundary());
+        assertFalse(completion.blocked());
+        assertEquals(0.0, completion.consumedTime(), TOLERANCE);
+        assertEquals(1.0, budget.remainingTime(), TOLERANCE);
     }
 
     @Test

@@ -69,8 +69,11 @@ public final class RailMovementBudget {
     }
 
     public MovementCompletion complete(MovementLimit limit, double actualX, double actualZ) {
-        if (limit.requestedDistance <= MOVEMENT_EPSILON || limit.scale <= TIME_EPSILON) {
+        if (limit.requestedDistance <= MOVEMENT_EPSILON) {
             return new MovementCompletion(false, false, 0.0);
+        }
+        if (limit.scale <= TIME_EPSILON) {
+            return new MovementCompletion(limit.reachesBoundary, false, 0.0);
         }
 
         double unitX = limit.requestedX / limit.requestedDistance;
@@ -92,7 +95,7 @@ public final class RailMovementBudget {
         if (candidate < -TIME_EPSILON) {
             return current;
         }
-        return Math.min(current, Math.max(0.0, candidate));
+        return Math.clamp(candidate, 0.0, current);
     }
 
     public record MovementLimit(
@@ -104,10 +107,6 @@ public final class RailMovementBudget {
     ) {
         public double scaleX() {
             return this.requestedX * this.scale;
-        }
-
-        public double scaleZ() {
-            return this.requestedZ * this.scale;
         }
     }
 
