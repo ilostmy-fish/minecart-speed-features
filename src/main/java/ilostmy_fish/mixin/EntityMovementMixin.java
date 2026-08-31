@@ -6,7 +6,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.ModifyConstant;
 
-// Allows minecarts to commit any nonzero movement accepted by vanilla collision resolution.
+/** Allows minecarts to commit any nonzero movement accepted by vanilla collision resolution. */
 @Mixin(Entity.class)
 public abstract class EntityMovementMixin {
     @ModifyConstant(
