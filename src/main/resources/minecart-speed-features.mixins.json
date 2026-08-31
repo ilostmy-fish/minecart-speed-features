@@ -4,6 +4,7 @@
   "package": "ilostmy_fish.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "EntityMovementMixin",
     "GameRulesMixin",
     "GameRulesIntRuleInvoker",
     "MinecartRailTraversalMixin",
