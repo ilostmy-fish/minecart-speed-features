@@ -12,6 +12,7 @@ public final class MinecartSpeedFeatures implements ModInitializer {
 
     public static GameRules.Key<GameRules.IntRule> MINECART_MAX_SPEED;
     public static GameRules.Key<GameRules.IntRule> MINECART_DAMAGE_PERCENT;
+    public static GameRules.Key<GameRules.IntRule> MINECART_IMPACT_HYSTERESIS_TICKS;
 
     @Override
     public void onInitialize() {

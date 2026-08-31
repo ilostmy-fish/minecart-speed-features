@@ -49,5 +49,19 @@ public abstract class GameRulesMixin {
                     type
             );
         }
+
+        if (MinecartSpeedFeatures.MINECART_IMPACT_HYSTERESIS_TICKS == null) {
+            GameRules.Type<GameRules.IntRule> type = GameRulesIntRuleInvoker.minecartspeedfeatures$create(
+                    3,
+                    0,
+                    20,
+                    NoOpRuleCallback.INSTANCE
+            );
+            MinecartSpeedFeatures.MINECART_IMPACT_HYSTERESIS_TICKS = register(
+                    "minecartImpactHysteresisTicks",
+                    GameRules.Category.MISC,
+                    type
+            );
+        }
     }
 }
