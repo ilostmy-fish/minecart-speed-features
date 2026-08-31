@@ -62,11 +62,11 @@ public abstract class MinecartCollisionMixin extends Entity {
         super(type, world);
     }
 
-//    /** Test: make minecarts solid to other entities, matching boat-style collidability. */
-//    @Override
-//    public boolean isCollidable() {
-//        return true;
-//    }
+    /** Test: make minecarts solid to other entities, matching boat-style collidability. */
+    @Override
+    public boolean isCollidable() {
+        return true;
+    }
 
     @Inject(
             method = "moveOnRail(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;)V",
