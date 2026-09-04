@@ -52,7 +52,7 @@ public abstract class GameRulesMixin {
 
         if (MinecartSpeedFeatures.MINECART_IMPACT_HYSTERESIS_TICKS == null) {
             GameRules.Type<GameRules.IntRule> type = GameRulesIntRuleInvoker.minecartspeedfeatures$create(
-                    3,
+                    5,
                     0,
                     20,
                     NoOpRuleCallback.INSTANCE
