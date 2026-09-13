@@ -43,4 +43,4 @@ replay_*.log
 
 logs/
 # archived low-ROI tests
-agentsDoNotInteract/
+agentsDoNotInteract
