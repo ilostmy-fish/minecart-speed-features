@@ -9,8 +9,6 @@ package ilostmy_fish.rail;
  * immediately used for the remaining fraction of the tick without granting another whole tick.</p>
  */
 public final class RailMovementBudget {
-    public static final double TIME_EPSILON = 1.0E-9;
-    private static final double MOVEMENT_EPSILON = 1.0E-12;
     private static final double COLLISION_EPSILON = 1.0E-7;
 
     private double remainingTime = 1.0;
@@ -20,7 +18,7 @@ public final class RailMovementBudget {
     }
 
     public boolean hasTimeRemaining() {
-        return this.remainingTime > TIME_EPSILON;
+        return this.remainingTime > 0.0;
     }
 
     public MovementLimit limit(
@@ -32,29 +30,29 @@ public final class RailMovementBudget {
             double requestedZ
     ) {
         double requestedDistance = Math.hypot(requestedX, requestedZ);
-        if (requestedDistance <= MOVEMENT_EPSILON || !this.hasTimeRemaining()) {
+        if (requestedDistance == 0.0 || !this.hasTimeRemaining()) {
             return new MovementLimit(requestedX, requestedZ, 0.0, requestedDistance, false);
         }
 
         double boundaryScale = Double.POSITIVE_INFINITY;
-        if (requestedX > MOVEMENT_EPSILON) {
+        if (requestedX > 0.0) {
             boundaryScale = positiveMinimum(
                     boundaryScale,
                     (railX + 1.0 - startX) / requestedX
             );
-        } else if (requestedX < -MOVEMENT_EPSILON) {
+        } else if (requestedX < 0.0) {
             boundaryScale = positiveMinimum(
                     boundaryScale,
                     (railX - startX) / requestedX
             );
         }
 
-        if (requestedZ > MOVEMENT_EPSILON) {
+        if (requestedZ > 0.0) {
             boundaryScale = positiveMinimum(
                     boundaryScale,
                     (railZ + 1.0 - startZ) / requestedZ
             );
-        } else if (requestedZ < -MOVEMENT_EPSILON) {
+        } else if (requestedZ < 0.0) {
             boundaryScale = positiveMinimum(
                     boundaryScale,
                     (railZ - startZ) / requestedZ
@@ -64,15 +62,15 @@ public final class RailMovementBudget {
         double scale = Math.min(this.remainingTime, boundaryScale);
         scale = Math.max(0.0, scale);
         boolean reachesBoundary = Double.isFinite(boundaryScale)
-                && boundaryScale <= this.remainingTime + TIME_EPSILON;
+                && boundaryScale <= this.remainingTime;
         return new MovementLimit(requestedX, requestedZ, scale, requestedDistance, reachesBoundary);
     }
 
     public MovementCompletion complete(MovementLimit limit, double actualX, double actualZ) {
-        if (limit.requestedDistance <= MOVEMENT_EPSILON) {
+        if (limit.requestedDistance == 0.0) {
             return new MovementCompletion(false, false, 0.0);
         }
-        if (limit.scale <= TIME_EPSILON) {
+        if (limit.scale == 0.0) {
             return new MovementCompletion(limit.reachesBoundary, false, 0.0);
         }
 
@@ -92,7 +90,7 @@ public final class RailMovementBudget {
     }
 
     private static double positiveMinimum(double current, double candidate) {
-        if (candidate < -TIME_EPSILON) {
+        if (candidate < 0.0) {
             return current;
         }
         return Math.clamp(candidate, 0.0, current);

@@ -9,7 +9,9 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 
-/** Resolves the actual rail block/state at an authoritative minecart position. */
+/**
+ * Resolves the actual rail block/state at an authoritative minecart position.
+ */
 public final class RailResolver {
     private RailResolver() {
     }
@@ -29,7 +31,9 @@ public final class RailResolver {
         return new RailRef(pos.toImmutable(), state, shape);
     }
 
-    /** Matches the below-first lookup used by the vanilla 1.21.1 minecart tick. */
+    /**
+     * Matches the below-first lookup used by the vanilla 1.21.1 minecart tick.
+     */
     @Nullable
     public static RailRef atCart(World world, Vec3d cartPosition) {
         BlockPos cartBlock = BlockPos.ofFloored(cartPosition);
@@ -43,7 +47,9 @@ public final class RailResolver {
         return from(cartBlock, world.getBlockState(cartBlock));
     }
 
-    /** Resolves ownership on the far side of a completed rail face without moving the entity. */
+    /**
+     * Resolves ownership on the far side of a completed rail face without moving the entity.
+     */
     @Nullable
     public static RailRef afterBoundary(
             World world,
@@ -67,7 +73,7 @@ public final class RailResolver {
             Vec3d cartPosition,
             Vec3d velocity
     ) {
-        if (Math.hypot(velocity.getX(), velocity.getZ()) <= RailMovementBudget.TIME_EPSILON) {
+        if (velocity.getX() == 0.0 && velocity.getZ() == 0.0) {
             return vanillaRail;
         }
 
