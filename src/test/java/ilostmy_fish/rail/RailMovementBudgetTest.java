@@ -165,4 +165,61 @@ class RailMovementBudgetTest {
         assertFalse(completion.reachedBoundary());
         assertEquals(1.0 - 0.3 / 3.4, budget.remainingTime(), TOLERANCE);
     }
+
+    @Test
+    void tinyNonzeroMovementStillConsumesTime() {
+        RailMovementBudget budget = new RailMovementBudget();
+        RailMovementBudget.MovementLimit limit = budget.limit(
+                0.5, 0.5, 0, 0, 5.0E-13, 0.0
+        );
+        RailMovementBudget.MovementCompletion completion = budget.complete(
+                limit, limit.scaleX(), 0.0
+        );
+
+        assertEquals(1.0, limit.scale(), 0.0);
+        assertEquals(1.0, completion.consumedTime(), 0.0);
+        assertFalse(budget.hasTimeRemaining());
+        assertEquals(0.0, budget.remainingTime(), 0.0);
+    }
+
+    @Test
+    void tinyPositiveRemainingTimeIsStillAvailable() {
+        RailMovementBudget budget = new RailMovementBudget();
+        RailMovementBudget.MovementLimit limit = budget.limit(
+                0.0, 0.5, 0, 0, 1.0, 0.0
+        );
+        budget.complete(limit, 1.0 - 5.0E-10, 0.0);
+
+        assertTrue(budget.hasTimeRemaining());
+        assertTrue(budget.remainingTime() > 0.0);
+        assertTrue(budget.remainingTime() < 1.0E-9);
+    }
+
+    @Test
+    void boundaryBeyondRemainingTimeIsNotReached() {
+        RailMovementBudget budget = new RailMovementBudget();
+        RailMovementBudget.MovementLimit first = budget.limit(
+                0.5, 0.5, 0, 0, 1.0, 0.0
+        );
+        budget.complete(first, first.scaleX(), 0.0);
+
+        RailMovementBudget.MovementLimit second = budget.limit(
+                0.4999999995, 0.5, 0, 0, 1.0, 0.0
+        );
+
+        assertEquals(0.5, budget.remainingTime(), 0.0);
+        assertEquals(0.5, second.scale(), 0.0);
+        assertFalse(second.reachesBoundary());
+    }
+
+    @Test
+    void boundaryBehindCartIsNotCollapsedToZeroDistance() {
+        RailMovementBudget budget = new RailMovementBudget();
+        RailMovementBudget.MovementLimit limit = budget.limit(
+                1.0000000005, 0.5, 0, 0, 1.0, 0.0
+        );
+
+        assertEquals(1.0, limit.scale(), 0.0);
+        assertFalse(limit.reachesBoundary());
+    }
 }
