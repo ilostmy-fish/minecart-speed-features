@@ -175,8 +175,8 @@ public abstract class MinecartCollisionMixin extends Entity {
     }
 
     /**
-     * Vanilla only runs rideable-minecart mob pickup above 2 blocks/second. MSF inverts that gate:
-     * slow carts may pick mobs up, while faster carts use impact handling instead.
+     * Vanilla only runs the rideable-minecart nearby-entity interaction scan above 2 blocks/second.
+     * MSF runs that scan for any nonzero absolute velocity and suppresses it only at exactly zero.
      */
     @ModifyExpressionValue(
             method = "tick()V",
@@ -185,13 +185,28 @@ public abstract class MinecartCollisionMixin extends Entity {
                     target = "Lnet/minecraft/util/math/Vec3d;horizontalLengthSquared()D"
             )
     )
-    private double minecartspeedfeatures$limitAutomaticMobPickupToSlowCarts(double horizontalSpeedSquared) {
+    private double minecartspeedfeatures$runEntityInteractionsWhileMoving(double horizontalSpeedSquared) {
         // The vanilla comparison immediately after this call is `> 0.01`. Return a value on the
-        // corresponding side of that comparison instead of replacing tick() or duplicating its
-        // entity-interaction loop, keeping the modification narrowly scoped to the pickup gate.
-        return horizontalSpeedSquared <= minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_SQUARED
-                ? 1.0
-                : 0.0;
+        // corresponding side of that comparison based on absolute velocity, preserving vanilla's
+        // entity query and interaction loop while skipping the scan only at exactly zero velocity.
+        return this.getVelocity().lengthSquared() > 0.0 ? 1.0 : 0.0;
+    }
+
+    /**
+     * Within vanilla's interaction loop, mobs may mount only below 2 blocks/second absolute speed.
+     * At or above that threshold, report the cart as occupied so vanilla takes its push branch.
+     */
+    @ModifyExpressionValue(
+            method = "tick()V",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/entity/vehicle/AbstractMinecartEntity;hasPassengers()Z"
+            )
+    )
+    private boolean minecartspeedfeatures$preventAutomaticMobPickupAtHighSpeed(boolean hasPassengers) {
+        return hasPassengers
+                || this.getVelocity().lengthSquared()
+                >= minecartspeedfeatures$MOB_INTERACTION_SPEED_THRESHOLD_SQUARED;
     }
 
     @Inject(method = "tick()V", at = @At("HEAD"))

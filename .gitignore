@@ -42,5 +42,7 @@ replay_*.log
 # misc
 
 logs/
+
 # archived low-ROI tests
-agentsDoNotInteract
+
+/agentsDoNotInteract/
