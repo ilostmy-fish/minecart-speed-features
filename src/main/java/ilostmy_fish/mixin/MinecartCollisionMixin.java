@@ -8,6 +8,7 @@ import ilostmy_fish.physics.ImpactPhysics;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.vehicle.AbstractMinecartEntity;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
@@ -16,6 +17,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.List;
@@ -197,6 +199,27 @@ public abstract class MinecartCollisionMixin extends Entity {
         // corresponding side of that comparison based on absolute velocity, preserving vanilla's
         // entity query and interaction loop while skipping the scan only at exactly zero velocity.
         return this.getVelocity().lengthSquared() > 0.0 ? 1.0 : 0.0;
+    }
+
+    /**
+     * Vanilla's low-speed fallback already scans nearby entities for minecart-to-minecart pushing.
+     * Reuse that scan for players, but invoke the minecart's push implementation so the cart gets
+     * the primary impulse. Returning false keeps players out of vanilla's minecart-only branch.
+     */
+    @Redirect(
+            method = "tick()V",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/entity/Entity;isPushable()Z"
+            )
+    )
+    private boolean minecartspeedfeatures$pushPlayerFromFallbackScan(Entity entity) {
+        boolean isPushable = entity.isPushable();
+        if (isPushable && entity instanceof PlayerEntity player) {
+            this.pushAwayFrom(player);
+            return false;
+        }
+        return isPushable;
     }
 
     /**
