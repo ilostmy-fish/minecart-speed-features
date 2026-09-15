@@ -5,12 +5,10 @@ import ilostmy_fish.MinecartSpeedFeatures;
 import ilostmy_fish.collision.ImpactContactTracker;
 import ilostmy_fish.damage.MinecartImpactDamageSource;
 import ilostmy_fish.physics.ImpactPhysics;
-import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.vehicle.AbstractMinecartEntity;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
@@ -23,13 +21,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import java.util.List;
 
 /**
- * Turns a rail-movement collision with a living entity into a speed-based impact.
+ * Turns a minecart movement collision with a living entity into a speed-based impact.
  *
  * <p>Vanilla still owns collision placement: {@link Entity#move} places the cart at the contact
  * point and zeroes the obstructed velocity component. This mixin captures the incoming velocity,
  * deals damage and knockback, then replaces that zeroed velocity with the residual speed from
- * {@link ImpactPhysics}. MSF's traversal still sees the shortened movement and terminates the
- * current tick's path normally.</p>
+ * {@link ImpactPhysics}. On rails, MSF's traversal still sees the shortened movement and terminates
+ * the current tick's path normally.</p>
  */
 @Mixin(AbstractMinecartEntity.class)
 public abstract class MinecartCollisionMixin extends Entity {
@@ -47,9 +45,13 @@ public abstract class MinecartCollisionMixin extends Entity {
     private static final double minecartspeedfeatures$IMPACT_SEARCH_EXPANSION = 0.1;
     @Unique
     private static final double minecartspeedfeatures$MIN_DIRECTION_LENGTH_SQUARED = 1.0E-12;
+    @Unique
+    private static final double minecartspeedfeatures$OCCUPIED_IMPACT_MULTIPLIER = 1.0;
+    @Unique
+    private static final double minecartspeedfeatures$UNOCCUPIED_IMPACT_MULTIPLIER = 0.83333;
 
     @Unique
-    private Vec3d minecartspeedfeatures$velocityBeforeRailMove = Vec3d.ZERO;
+    private Vec3d minecartspeedfeatures$velocityBeforeMove = Vec3d.ZERO;
     @Unique
     private ImpactContactTracker minecartspeedfeatures$impactContacts;
 
@@ -66,38 +68,36 @@ public abstract class MinecartCollisionMixin extends Entity {
     }
 
     @Inject(
-            method = "moveOnRail(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;)V",
+            method = {
+                    "moveOnRail(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;)V",
+                    "moveOffRail()V"
+            },
             at = @At(
                     value = "INVOKE",
                     target = "Lnet/minecraft/entity/vehicle/AbstractMinecartEntity;move(Lnet/minecraft/entity/MovementType;Lnet/minecraft/util/math/Vec3d;)V"
             )
     )
-    private void minecartspeedfeatures$captureImpactVelocity(
-            BlockPos pos,
-            BlockState state,
-            CallbackInfo ci
-    ) {
-        this.minecartspeedfeatures$velocityBeforeRailMove = this.getVelocity();
+    private void minecartspeedfeatures$captureImpactVelocity(CallbackInfo ci) {
+        this.minecartspeedfeatures$velocityBeforeMove = this.getVelocity();
     }
 
     @Inject(
-            method = "moveOnRail(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;)V",
+            method = {
+                    "moveOnRail(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;)V",
+                    "moveOffRail()V"
+            },
             at = @At(
                     value = "INVOKE",
                     target = "Lnet/minecraft/entity/vehicle/AbstractMinecartEntity;move(Lnet/minecraft/entity/MovementType;Lnet/minecraft/util/math/Vec3d;)V",
                     shift = At.Shift.AFTER
             )
     )
-    private void minecartspeedfeatures$handleLivingEntityImpact(
-            BlockPos pos,
-            BlockState state,
-            CallbackInfo ci
-    ) {
+    private void minecartspeedfeatures$handleLivingEntityImpact(CallbackInfo ci) {
         if (this.getWorld().isClient || !this.horizontalCollision) {
             return;
         }
 
-        Vec3d incomingVelocity = this.minecartspeedfeatures$velocityBeforeRailMove;
+        Vec3d incomingVelocity = this.minecartspeedfeatures$velocityBeforeMove;
         LivingEntity target = null;
         boolean suppressSpecialEffects = false;
 
@@ -140,18 +140,25 @@ public abstract class MinecartCollisionMixin extends Entity {
         );
 
         if (!suppressSpecialEffects) {
+            double occupancyMultiplier = this.hasPassengers()
+                    ? minecartspeedfeatures$OCCUPIED_IMPACT_MULTIPLIER
+                    : minecartspeedfeatures$UNOCCUPIED_IMPACT_MULTIPLIER;
+
             // Inspired by Cammie's velocity-based knockback: horizontal knockback uses 80% of the
             // cart's incoming velocity and vertical knockback uses 20% of its total incoming speed.
+            // Occupancy scales knockback independently of the damage-only gamerule below.
             target.addVelocity(
-                    incomingVelocity.getX() * 0.8,
-                    incomingVelocity.length() * 0.2,
-                    incomingVelocity.getZ() * 0.8
+                    incomingVelocity.getX() * 0.8 * occupancyMultiplier,
+                    incomingVelocity.length() * 0.2 * occupancyMultiplier,
+                    incomingVelocity.getZ() * 0.8 * occupancyMultiplier
             );
 
             int damagePercent = MinecartSpeedFeatures.MINECART_DAMAGE_PERCENT == null
                     ? 100
                     : this.getWorld().getGameRules().getInt(MinecartSpeedFeatures.MINECART_DAMAGE_PERCENT);
-            double scaledDamage = impact.damagePotential() * damagePercent / 100.0;
+            double scaledDamage = impact.damagePotential()
+                    * damagePercent / 100.0
+                    * occupancyMultiplier;
             List<Entity> passengers = this.getPassengerList();
             Entity attributedPassenger = passengers.isEmpty() ? null : passengers.getFirst();
             target.damage(
