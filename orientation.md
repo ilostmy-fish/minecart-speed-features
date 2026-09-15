@@ -46,3 +46,5 @@ Preserve the ownership boundaries when modifying this code. Vanilla owns rail be
 Do not look at `agentsDoNotInteract/` or its contents.
 
 Active unit tests live under `src/test/java/ilostmy_fish/`. Don't think too hard about the existing test. This mod isn't finished and test have come and gone, so if you run into a build failure, use HumanToolCall for my guidance on how to navigate either modifying a test or removing it. Same goes for asking me if I want tests added. You should generally ask me before you even start working on formulating a test.
+
+In order to NOT BREAK The Copper Minecart (@ commit d19ea3e) compatibility, these are the invariants I would treat as non-negotiable while modifying minecart physics: powered-rail BlockState.isOf(...) invocation must remain; getVelocity() ordinal 9 must remain the powered-acceleration entry landmark; The Copper Rail's cancellation ordering must not bypass any new universal physics.
