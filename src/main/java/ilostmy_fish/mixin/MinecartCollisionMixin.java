@@ -16,6 +16,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.List;
@@ -197,6 +198,25 @@ public abstract class MinecartCollisionMixin extends Entity {
         // corresponding side of that comparison based on absolute velocity, preserving vanilla's
         // entity query and interaction loop while skipping the scan only at exactly zero velocity.
         return this.getVelocity().lengthSquared() > 0.0 ? 1.0 : 0.0;
+    }
+
+    /**
+     * Vanilla's fallback branch scans nearby entities for minecart-to-minecart pushes. Exact-zero
+     * carts cannot initiate a push, so skip that world query until another source gives them velocity.
+     */
+    @Redirect(
+            method = "tick()V",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/world/World;getOtherEntities(Lnet/minecraft/entity/Entity;Lnet/minecraft/util/math/Box;)Ljava/util/List;"
+            )
+    )
+    private List<Entity> minecartspeedfeatures$skipStationaryMinecartFallbackScan(
+            World world, Entity except, Box box
+    ) {
+        return this.getVelocity().lengthSquared() == 0.0
+                ? List.of()
+                : world.getOtherEntities(except, box);
     }
 
     /**
